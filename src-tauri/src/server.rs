@@ -137,60 +137,25 @@ fn run_yt_dlp(state: &AppState, args: &[String], timeout_secs: u64) -> Result<St
 
 // ---------------------------------------------------------------- search
 
-async fn search(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
-    let query = qp(&q, "q");
-    let platform = qp(&q, "platform");
-    let limit: usize = q.get("limit").and_then(|v| v.parse().ok()).unwrap_or(10).clamp(1, 24);
-    if query.trim().is_empty() {
-        return json_ok(json!({ "success": true, "tracks": [] }));
-    }
-
-    // Fast path: direct YouTube Music search. No child process, no Python startup.
-    if !platform.eq_ignore_ascii_case("soundcloud") {
-        let cache_key = format!("ytm:{}:{}", limit, query.trim().to_lowercase());
-        if let Some(cached) =
-            state::cache_get(&state.search_cache, &cache_key, Duration::from_secs(300))
-        {
-            return json_ok(json!({ "success": true, "tracks": cached }));
-        }
-        match ytm::search(&state.http(), query.trim(), limit).await {
-            Ok(tracks) if !tracks.is_empty() => {
-                state::cache_put(
-                    &state.search_cache,
-                    cache_key,
-                    tracks.clone(),
-                    128,
-                    Duration::from_secs(300),
-                );
-                return json_ok(json!({ "success": true, "tracks": tracks }));
-            }
-            Ok(_) => util::log_line("INFO", "ytmusic search returned no tracks; using yt-dlp"),
-            Err(e) => util::log_line("WARN", &format!("{e}; using yt-dlp")),
-        }
-    }
-
-    let prefix = if platform.eq_ignore_ascii_case("soundcloud") { "scsearch" } else { "ytsearch" };
-    let search_target = format!("{prefix}{limit}:{query}");
+/// yt-dlp `--dump-json` flat playlist search, shared by the soundcloud path and
+/// the unified hybrid ("rifflibrary") search pool.
+async fn ytdlp_search(state: &Shared, target: &str, platform_name: &str) -> Result<Vec<Value>, String> {
     let args = vec![
         "--dump-json".to_string(),
         "--flat-playlist".to_string(),
         "--no-warnings".to_string(),
         "--no-playlist".to_string(),
-        search_target,
+        target.to_string(),
     ];
     let state_for_task = state.clone();
-    let out = match tokio::task::spawn_blocking(move || run_yt_dlp(&state_for_task, &args, 25)).await
-    {
+    // SoundCloud responds in ~20-25 s on slower networks; a 25 s timeout used to
+    // kill it and silently yield an empty half of the pool. Give it room.
+    let out = match tokio::task::spawn_blocking(move || run_yt_dlp(&state_for_task, &args, 90)).await {
         Ok(Ok(out)) => out,
-        Ok(Err(e)) => {
-            util::log_line("WARN", &format!("search failed: {e}"));
-            return json_ok(json!({ "success": false, "tracks": [], "error": e }));
-        }
-        Err(e) => {
-            util::log_line("WARN", &format!("search task failed: {e}"));
-            return json_ok(json!({ "success": false, "tracks": [], "error": "search task failed" }));
-        }
+        Ok(Err(e)) => return Err(e),
+        Err(_) => return Err("search task failed".to_string()),
     };
+    let is_soundcloud = platform_name.eq_ignore_ascii_case("soundcloud");
     let mut tracks = Vec::new();
     for line in out.lines() {
         if let Ok(item) = serde_json::from_str::<Value>(line) {
@@ -228,12 +193,143 @@ async fn search(State(state): State<Shared>, Query(q): Query<HashMap<String, Str
                 "duration": duration,
                 "thumbnail": thumbnail,
                 "url": url,
-                "platform": if platform.eq_ignore_ascii_case("soundcloud") { "soundcloud" } else { "ytmusic" },
+                "platform": if is_soundcloud { "soundcloud" } else { "ytmusic" },
                 "source": "youtube",
             }));
         }
     }
-    json_ok(json!({ "success": true, "tracks": tracks }))
+    Ok(tracks)
+}
+
+/// Download a resolved YouTube stream to `tracks/<id>.<ext>` in the background
+/// (upstream parity). Repeat plays and cross-episode caching then never hit the
+/// network again. Best-effort: any failure leaves the file missing and the next
+/// stream-info call simply retries.
+fn cache_resolved_stream(resolved_id: &str, ext: &str, url: &str) {
+    if resolved_id.len() != 11 {
+        return;
+    }
+    let target = util::cache_dir().join(format!("{resolved_id}.{ext}"));
+    if target.is_file() {
+        return;
+    }
+    let client = match reqwest::blocking::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+        .connect_timeout(std::time::Duration::from_secs(8))
+        .timeout(std::time::Duration::from_secs(90))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return,
+    };
+    let Ok(response) = client.get(url).send() else {
+        return;
+    };
+    let Ok(bytes) = response.bytes() else {
+        return;
+    };
+    if bytes.is_empty() || bytes.len() > 128 * 1024 * 1024 {
+        return;
+    }
+    let _ = fs::create_dir_all(util::cache_dir());
+    let tmp = target.with_extension(format!("{ext}.download"));
+    if fs::write(&tmp, &bytes).is_ok() {
+        if fs::rename(&tmp, &target).is_err() {
+            let _ = fs::copy(&tmp, &target);
+            let _ = fs::remove_file(&tmp);
+        }
+        util::log_line("INFO", &format!("cached stream {resolved_id} -> {}", target.display()));
+    } else {
+        let _ = fs::remove_file(&tmp);
+    }
+}
+
+async fn search(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let query = qp(&q, "q");
+    let platform = qp(&q, "platform");
+    let limit: usize = q.get("limit").and_then(|v| v.parse().ok()).unwrap_or(10).clamp(1, 24);
+    if query.trim().is_empty() {
+        return json_ok(json!({ "success": true, "tracks": [] }));
+    }
+
+    // Hybrid unified search (upstream's "Riff Library hybrid streaming"):
+    // YouTube Music + SoundCloud interleaved 2:1, single ranked list.
+    if platform.eq_ignore_ascii_case("rifflibrary") {
+        let cache_key = format!("rifflib:{}:{}", limit, query.trim().to_lowercase());
+        if let Some(cached) =
+            state::cache_get(&state.search_cache, &cache_key, Duration::from_secs(300))
+        {
+            return json_ok(json!({ "success": true, "tracks": cached }));
+        }
+        let (ytm_tracks, sc_tracks) = futures_util::future::join(
+            ytm::search(&state.http(), query.trim(), limit),
+            ytdlp_search(&state, &format!("scsearch{}:{}", limit, query.trim()), "soundcloud"),
+        )
+        .await;
+        let ytm_tracks = ytm_tracks.unwrap_or_default();
+        let sc_tracks = sc_tracks.unwrap_or_default();
+        let mut combined: Vec<Value> = Vec::with_capacity(ytm_tracks.len() + sc_tracks.len());
+        let mut yi = 0usize;
+        let mut si = 0usize;
+        while yi < ytm_tracks.len() || si < sc_tracks.len() {
+            if yi < ytm_tracks.len() {
+                combined.push(ytm_tracks[yi].clone());
+                yi += 1;
+            }
+            if yi < ytm_tracks.len() {
+                combined.push(ytm_tracks[yi].clone());
+                yi += 1;
+            }
+            if si < sc_tracks.len() {
+                combined.push(sc_tracks[si].clone());
+                si += 1;
+            }
+        }
+        for t in combined.iter_mut() {
+            if let Some(map) = t.as_object_mut() {
+                if let Some(id) = map.get("id").and_then(|v| v.as_str()).map(String::from) {
+                    let cached = library::find_track_by_id(&id).is_some();
+                    map.insert("isCached".to_string(), json!(cached));
+                }
+            }
+        }
+        state::cache_put(&state.search_cache, cache_key, combined.clone(), 128, Duration::from_secs(300));
+        return json_ok(json!({ "success": true, "tracks": combined }));
+    }
+
+    // Fast path: direct YouTube Music search. No child process, no Python startup.
+    if !platform.eq_ignore_ascii_case("soundcloud") {
+        let cache_key = format!("ytm:{}:{}", limit, query.trim().to_lowercase());
+        if let Some(cached) =
+            state::cache_get(&state.search_cache, &cache_key, Duration::from_secs(300))
+        {
+            return json_ok(json!({ "success": true, "tracks": cached }));
+        }
+        match ytm::search(&state.http(), query.trim(), limit).await {
+            Ok(tracks) if !tracks.is_empty() => {
+                state::cache_put(
+                    &state.search_cache,
+                    cache_key,
+                    tracks.clone(),
+                    128,
+                    Duration::from_secs(300),
+                );
+                return json_ok(json!({ "success": true, "tracks": tracks }));
+            }
+            Ok(_) => util::log_line("INFO", "ytmusic search returned no tracks; using yt-dlp"),
+            Err(e) => util::log_line("WARN", &format!("{e}; using yt-dlp")),
+        }
+    }
+
+    let prefix = if platform.eq_ignore_ascii_case("soundcloud") { "scsearch" } else { "ytsearch" };
+    let search_target = format!("{prefix}{limit}:{query}");
+    match ytdlp_search(&state, &search_target, &platform).await {
+        Ok(tracks) => json_ok(json!({ "success": true, "tracks": tracks })),
+        Err(e) => {
+            util::log_line("WARN", &format!("search failed: {e}"));
+            json_ok(json!({ "success": false, "tracks": [], "error": e }))
+        }
+    }
 }
 
 // ------------------------------------------------------------- stream info
@@ -357,10 +453,24 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         .map(|s| s.to_string())
         .or_else(|| item_thumbnail(&info))
         .unwrap_or_default();
-    let mime = info.get("ext").and_then(|v| v.as_str()).map(util::mime_from_ext).unwrap_or("audio/mp4");
+    let ext = info.get("ext").and_then(|v| v.as_str()).unwrap_or("webm").to_string();
+    let mime = util::mime_from_ext(&ext);
+    // Match upstream's shape: the renderer picks `proxyUrl || streamUrl` for
+    // non-local tracks. The raw CDN URL breaks the Web Audio pipeline because
+    // googlevideo.com does not send CORS headers; the loopback proxy always works.
+    let port = state.server_port;
+    let proxied = format!(
+        "http://127.0.0.1:{port}/api/audio-proxy?url={}",
+        util::percent_encode(&stream_url)
+    );
     let payload = json!({
         "success": true,
-        "streamUrl": stream_url,
+        "isLocal": false,
+        "streamUrl": proxied,
+        "rawStreamUrl": stream_url,
+        "proxyUrl": proxied,
+        "isHls": stream_url.contains(".m3u8"),
+        "binaryNote": Value::Null,
         "mimeType": mime,
         "resolvedId": resolved_id,
         "duration": duration,
@@ -369,6 +479,13 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         "thumbnail": thumbnail,
         "direct": true,
     });
+    // Background cache so the next play is offline-grade fast (upstream parity).
+    {
+        let dl_url = stream_url.clone();
+        let dl_id = resolved_id.clone();
+        let dl_ext = ext.clone();
+        std::thread::spawn(move || cache_resolved_stream(&dl_id, &dl_ext, &dl_url));
+    }
     state::cache_put(
         &state.stream_cache,
         cache_key,

@@ -63,6 +63,7 @@ The Electron main process and Node server were replaced with Rust.
 - ✅ Window visibility events (`window-visibility`) on minimize/restore/hide/show, so the renderer
   can pause visualizers/background video while hidden.
 - ✅ Shared pooled HTTP client (connection reuse, gzip) and bounded TTL caches for search/stream URLs
+- ✅ "Riff Library" hybrid search (`platform=rifflibrary`): single ranked list combining YouTube Music + SoundCloud interleaved 2:1, like upstream's unified pool. `/api/stream-info` returns `streamUrl`/`proxyUrl`/`rawStreamUrl` in upstream's shape; audio plays through the loopback `/api/audio-proxy` (edition that makes the Web Audio chain work), and resolved streams are cached to `tracks/<id>` in the background so repeat plays are local.
 - ✅ Discovery/recommendations (`src-tauri/src/discovery.rs`): country charts (`/api/top-chart`,
   YouTube Charts playlist browse via YTM inner API + iTunes RSS + Last.fm fallback), `/api/vibe`
   (seeded by YTM RDAMVM mixes + Deezer related artists, 20-minute cache), `/api/trending`
