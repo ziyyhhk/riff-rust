@@ -24,6 +24,8 @@ The Electron main process and Node server were replaced with Rust.
 ## What works today (v0.1)
 
 - ✅ Same UI (styles.css, index.html, app.js, themes, assets)
+- ✅ First-run onboarding wizard — identical flow to upstream (language → look → make it yours → launcher → connect), shown only on first launch (versioned `.rifftutorial` marker)
+- ✅ "Start Menu shortcut" launcher integration on Windows (creates a real `.lnk`)
 - ✅ Frameless window, tray icon (Show / Quit), close-to-tray
 - ✅ Local library: import audio files (file dialog → copied to library dir),
   tags read with `lofty` (title/artist/album/duration/cover), list/remove/update,
@@ -33,6 +35,7 @@ The Electron main process and Node server were replaced with Rust.
 - ✅ Downloads via yt-dlp + ffmpeg (`/api/download`, mp3/flac/opus/wav)
 - ✅ Tools status / auto-download of yt-dlp (`/api/tools/status`, `/api/tools/install`)
 - ✅ Lyrics via LRCLIB + custom `.lrc` lyrics (`/api/lyrics`)
+- ✅ Spotify playlist import (anonymous embed-token pathfinder flow, same as upstream; `/api/spotify-import` + `/api/playlist-import` for YouTube/SoundCloud playlists via yt-dlp)
 - ✅ Offline library listing/deletion (`/api/offline-library`, `/api/offline-delete`, `/api/clear-offline-library`)
 - ✅ Image proxy + audio proxy with Range forwarding (`/api/image-proxy`, `/api/audio-proxy`)
 - ✅ Local thumbnail serving, cache size/clear, data-dir & download-dir management,
@@ -46,7 +49,7 @@ The Electron main process and Node server were replaced with Rust.
 ## Not yet ported ❌ (returns `{ success: false, "error": "not yet ported…" }`)
 
 - Google / YouTube account sign-in & library import (OAuth PKCE flow, account encryption)
-- Spotify integration (auth, import, library) and Spotify playlist migration
+- Spotify integration (auth, personal library) — but **public playlist import works**
 - Apple Music, Deezer, Yandex, TikTok, VK playlist import
 - Last.fm (scrobbling, token flow)
 - Discovery/recommendations (`/api/vibe`, `/api/artist`, `/api/trending`, `/api/hot`, `/api/top-chart`)
@@ -54,7 +57,7 @@ The Electron main process and Node server were replaced with Rust.
 - Audio editor/trim/region-embed pipeline (editor UI loads, but backend trim export is unported)
 - Auto-updater (no release feed configured for Riff Rust yet)
 - Mini-player window, global media keys / global shortcuts registration
-- Playlist context menus (native), launcher integration ("Riff in Start Menu")
+- Playlist context menus (native); launcher integration outside Windows
 - Welcome/onboarding flow (window loads straight to the app)
 - Export/import of the encrypted account file (`RFAC` format)
 

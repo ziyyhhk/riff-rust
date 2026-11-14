@@ -1,6 +1,6 @@
 {
   "name": "riff-rust",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "productName": "Riff Rust",
   "description": "Riff Rust - a fast, low-memory desktop music player for YouTube Music, SoundCloud and local files, rebuilt in Rust (Tauri). Fork of Riff (MIT).",

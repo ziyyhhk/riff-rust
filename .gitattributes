@@ -1,0 +1,8 @@
+# Vendored third-party assets (excluded from language stats, they are upstream bundles)
+vendor/** linguist-vendored
+assets/hls.min.js linguist-vendored
+assets/Tone.js linguist-vendored
+assets/duck.json linguist-vendored
+assets/riff-rust-logo.png linguist-generated
+src-tauri/icons/** linguist-generated
+src-tauri/gen/** linguist-generated

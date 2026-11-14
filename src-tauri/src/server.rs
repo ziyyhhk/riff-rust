@@ -922,6 +922,425 @@ async fn brand_icon(State(_state): State<Shared>) -> Response {
     json_err(StatusCode::NOT_FOUND, "brand icon is bundled with the app")
 }
 
+// --------------------------------------------------------------- playlist import
+
+const SPOTIFY_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const SPOTIFY_PATHFINDER_URL: &str = "https://api-partner.spotify.com/pathfinder/v1/query";
+const SPOTIFY_FETCH_PLAYLIST_HASH: &str = "8964e8eafb21aa992a7d951d256d83285c04be2105d209262901de70cb97584a";
+
+fn parse_spotify_playlist_id(input: &str) -> Option<String> {
+    let s = input.trim();
+    let rest = if let Some(r) = s.strip_prefix("spotify:playlist:") {
+        r
+    } else {
+        let idx = s.find("playlist/")?;
+        &s[idx + "playlist/".len()..]
+    };
+    let id: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric()).take(22).collect();
+    (id.len() == 22).then_some(id)
+}
+
+/// Extract `<script id="__NEXT_DATA__" ...>{json}</script>` from an HTML page.
+fn extract_json_script(body: &str, script_id: &str) -> Option<String> {
+    let marker = format!("<script id=\"{script_id}\"");
+    let start = body.find(&marker)?;
+    let after = &body[start..];
+    let gt = after.find('>')?;
+    let rest = &after[gt + 1..];
+    let end = rest.find("</script>")?;
+    let slice = rest[..end].trim();
+    (!slice.is_empty()).then(|| slice.to_string())
+}
+
+fn spotify_track_from_v2(item: &Value) -> Option<Value> {
+    let t = item.get("itemV2").and_then(|v| v.get("data")).or_else(|| item.get("item").and_then(|v| v.get("data")))?;
+    let title = t.get("name").and_then(|v| v.as_str())?.trim().to_string();
+    if title.is_empty() {
+        return None;
+    }
+    let artists = t
+        .get("albumOfTrack")
+        .and_then(|a| a.get("artists"))
+        .and_then(|a| a.get("items"))
+        .and_then(|a| a.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|a| a.get("profile").and_then(|p| p.get("name")).and_then(|n| n.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    let duration_ms = t
+        .get("trackDuration")
+        .and_then(|d| d.get("totalMilliseconds"))
+        .or_else(|| t.get("duration").and_then(|d| d.get("totalMilliseconds")))
+        .or_else(|| t.get("duration_ms"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let cover = t
+        .get("albumOfTrack")
+        .and_then(|a| a.get("coverArt"))
+        .and_then(|c| c.get("sources"))
+        .and_then(|s| s.as_array())
+        .and_then(|s| s.last())
+        .and_then(|s| s.get("url"))
+        .and_then(|u| u.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let is_unavailable = t
+        .get("playability")
+        .and_then(|p| p.get("playable"))
+        .and_then(|p| p.as_bool())
+        .or_else(|| t.get("isPlayable").and_then(|p| p.as_bool()))
+        .map(|playable| !playable)
+        .unwrap_or(false);
+    Some(json!({
+        "title": title,
+        "artist": artists,
+        "duration": (duration_ms / 1000.0) as u64,
+        "thumbnail": cover,
+        "cover": cover,
+        "isUnavailable": is_unavailable,
+    }))
+}
+
+fn spotify_track_from_embed(item: &Value) -> Option<Value> {
+    let title = item.get("title").or_else(|| item.get("name")).and_then(|v| v.as_str())?.trim().to_string();
+    if title.is_empty() {
+        return None;
+    }
+    let artist = item
+        .get("subtitle")
+        .or_else(|| item.get("artist"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let duration_ms = item
+        .get("duration")
+        .and_then(|v| v.as_f64())
+        .or_else(|| item.get("duration_ms").and_then(|v| v.as_f64()))
+        .unwrap_or(0.0);
+    let cover = item
+        .get("image")
+        .or_else(|| item.get("coverArt").and_then(|c| c.get("sources")).and_then(|s| s.as_array()).and_then(|s| s.first()))
+        .or_else(|| item.get("coverArt").and_then(|c| c.get("sources")).and_then(|s| s.as_array()).and_then(|s| s.first()).and_then(|s| s.get("url")))
+        .and_then(|v| v.as_str().or_else(|| v.get("url").and_then(|u| u.as_str())))
+        .unwrap_or_default()
+        .to_string();
+    let is_unavailable = item
+        .get("playability")
+        .and_then(|p| p.get("playable"))
+        .and_then(|p| p.as_bool())
+        .map(|playable| !playable)
+        .unwrap_or(false);
+    Some(json!({
+        "title": title,
+        "artist": artist,
+        "duration": (duration_ms / 1000.0) as u64,
+        "thumbnail": cover,
+        "cover": cover,
+        "isUnavailable": is_unavailable,
+    }))
+}
+
+/// Deep-walk the page-data tree for track-like objects (last-resort fallback).
+fn collect_tracks_walk(node: &Value, seen: &mut std::collections::HashSet<String>, out: &mut Vec<Value>) {
+    match node {
+        Value::Array(items) => {
+            for item in items {
+                collect_tracks_walk(item, seen, out);
+            }
+        }
+        Value::Object(map) => {
+            let uri = map.get("uri").and_then(|v| v.as_str()).unwrap_or("");
+            let title = map.get("title").or_else(|| map.get("name")).and_then(|v| v.as_str()).unwrap_or("");
+            let subtitle = map
+                .get("subtitle")
+                .or_else(|| map.get("artist"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    map.get("artists").and_then(|a| a.as_array()).map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|a| {
+                                a.as_str()
+                                    .map(|s| s.to_string())
+                                    .or_else(|| a.get("name").or_else(|| a.get("profile").and_then(|p| p.get("name"))).and_then(|v| v.as_str()).map(|s| s.to_string()))
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                });
+            let duration = map
+                .get("duration")
+                .and_then(|d| d.get("totalMilliseconds"))
+                .or_else(|| map.get("trackDuration").and_then(|d| d.get("totalMilliseconds")))
+                .or_else(|| map.get("duration_ms"))
+                .or_else(|| map.get("duration"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            if !title.is_empty()
+                && (subtitle.is_some() || uri.starts_with("spotify:track:"))
+                && (uri.starts_with("spotify:track:") || map.get("entityType").and_then(|v| v.as_str()) == Some("track") || duration > 0.0)
+            {
+                let key = format!("{}__{}", title, subtitle.clone().unwrap_or_default());
+                if seen.insert(key) {
+                    let cover = map
+                        .get("image")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| map.get("coverArt").and_then(|c| c.get("sources")).and_then(|s| s.as_array()).and_then(|s| s.first()).and_then(|s| s.get("url")).and_then(|u| u.as_str()))
+                        .unwrap_or("")
+                        .to_string();
+                    let dur_sec = if duration > 1000.0 { (duration / 1000.0) as u64 } else { duration as u64 };
+                    out.push(json!({
+                        "title": title.trim(),
+                        "artist": subtitle.unwrap_or_default().trim(),
+                        "duration": dur_sec,
+                        "thumbnail": cover,
+                        "cover": cover,
+                    }));
+                }
+            }
+            for value in map.values() {
+                collect_tracks_walk(value, seen, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+async fn spotify_pathfinder_page(client: &reqwest::Client, token: &str, playlist_id: &str, offset: u64, limit: u64) -> Result<Value, String> {
+    let body = json!({
+        "variables": { "uri": format!("spotify:playlist:{playlist_id}"), "offset": offset, "limit": limit, "enableWatchFeedEntrypoint": true },
+        "operationName": "fetchPlaylist",
+        "extensions": { "persistedQuery": { "version": 1, "sha256Hash": SPOTIFY_FETCH_PLAYLIST_HASH } },
+    });
+    let resp = client
+        .post(SPOTIFY_PATHFINDER_URL)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Referer", "https://open.spotify.com/")
+        .header("User-Agent", SPOTIFY_UA)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("pathfinder request failed: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(format!("Pathfinder status {}", status.as_u16()));
+    }
+    resp.json::<Value>().await.map_err(|e| format!("pathfinder parse error: {e}"))
+}
+
+async fn spotify_import(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let raw = qp(&q, "url");
+    let playlist_id = match parse_spotify_playlist_id(&raw) {
+        Some(id) => id,
+        None => return json_ok(json!({ "success": false, "code": "spotify_error", "error": "Invalid Spotify playlist URL" })),
+    };
+
+    let client = http_client(&state);
+    let embed_url = format!("https://open.spotify.com/embed/playlist/{playlist_id}");
+    let resp = match client.get(&embed_url).header("User-Agent", SPOTIFY_UA).header("Referer", "https://open.spotify.com/").header("Accept-Language", "en-US,en;q=0.9").send().await {
+        Ok(r) => r,
+        Err(_) => return json_ok(json!({ "success": false, "code": "spotify_error", "error": "Network error connecting to Spotify" })),
+    };
+    let status = resp.status().as_u16();
+    match status {
+        200 => {}
+        404 => return json_ok(json!({ "success": false, "code": "spotify_not_found", "error": "Playlist not found" })),
+        403 => return json_ok(json!({ "success": false, "code": "spotify_forbidden", "error": "Spotify refused request (403)" })),
+        429 => return json_ok(json!({ "success": false, "code": "spotify_rate_limited", "error": "Spotify rate limited (429)" })),
+        other => return json_ok(json!({ "success": false, "code": "spotify_error", "error": format!("Spotify returned status {other}") })),
+    }
+    let body = resp.text().await.unwrap_or_default();
+
+    let json_str = match extract_json_script(&body, "__NEXT_DATA__") {
+        Some(s) => s,
+        None => {
+            let is_private = body.to_lowercase().contains("private");
+            return json_ok(json!({
+                "success": false,
+                "code": if is_private { "spotify_forbidden" } else { "spotify_error" },
+                "error": if is_private { "Private playlist" } else { "Could not parse playlist" },
+            }));
+        }
+    };
+    let data: Value = match serde_json::from_str(&json_str) {
+        Ok(v) => v,
+        Err(_) => return json_ok(json!({ "success": false, "code": "spotify_error", "error": "Could not parse playlist" })),
+    };
+    let page_props = data.pointer("/props/pageProps").cloned().unwrap_or(json!({}));
+    if page_props.get("status").and_then(|v| v.as_u64()) == Some(404) {
+        return json_ok(json!({ "success": false, "code": "spotify_not_found", "error": "Playlist not found" }));
+    }
+    let entity = page_props.pointer("/state/data/entity").cloned().unwrap_or(json!({}));
+    let name = entity
+        .get("name")
+        .or_else(|| page_props.get("title"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("Spotify Playlist")
+        .to_string();
+    let cover = entity
+        .pointer("/images/0/url")
+        .or_else(|| entity.pointer("/coverArt/sources/0/url"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            body.split("og:image").nth(1).and_then(|part| part.split("content=\"").nth(1)).and_then(|part| part.split('"').next()).map(|s| s.to_string())
+        })
+        .unwrap_or_default();
+
+    // Preferred path: anonymous access token from the embed + pathfinder pagination
+    let access_token = page_props.pointer("/state/settings/session/accessToken").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let mut tracks: Vec<Value> = Vec::new();
+    let mut total = 0u64;
+    let mut limited = false;
+    if !access_token.is_empty() {
+        match spotify_pathfinder_page(&client, &access_token, &playlist_id, 0, 100).await {
+            Ok(first) => {
+                let content = first.pointer("/data/playlistV2/content").cloned().unwrap_or(json!({}));
+                let total_count = content.get("totalCount").and_then(|v| v.as_u64()).unwrap_or(0);
+                if let Some(items) = content.get("items").and_then(|v| v.as_array()) {
+                    let mut all = items.clone();
+                    let mut offset = items.len() as u64;
+                    let mut guard = 0;
+                    while offset < total_count && guard < 100 {
+                        guard += 1;
+                        match spotify_pathfinder_page(&client, &access_token, &playlist_id, offset, 100).await {
+                            Ok(page) => match page.pointer("/data/playlistV2/content/items").and_then(|v| v.as_array()).cloned() {
+                                Some(page_items) => {
+                                    if page_items.is_empty() {
+                                        break;
+                                    }
+                                    offset += page_items.len() as u64;
+                                    all.extend(page_items);
+                                }
+                                None => break,
+                            },
+                            Err(_) => break,
+                        }
+                    }
+                    tracks = all.iter().filter_map(spotify_track_from_v2).collect();
+                    total = total_count.max(tracks.len() as u64);
+                } else {
+                    limited = true;
+                }
+            }
+            Err(_) => {
+                limited = true;
+            }
+        }
+    } else {
+        limited = true;
+    }
+
+    // Fallback: embed trackList (max 100), then generic walk
+    if tracks.is_empty() {
+        if let Some(items) = entity.get("trackList").and_then(|v| v.as_array()) {
+            tracks = items.iter().take(100).filter_map(spotify_track_from_embed).collect();
+        }
+    }
+    if tracks.is_empty() {
+        let mut seen = std::collections::HashSet::new();
+        collect_tracks_walk(&page_props, &mut seen, &mut tracks);
+    }
+
+    if tracks.is_empty() {
+        return json_ok(json!({ "success": false, "code": "spotify_error", "error": "No tracks found in this playlist" }));
+    }
+    let count = tracks.len() as u64;
+    json_ok(json!({
+        "success": true,
+        "name": name,
+        "cover": cover,
+        "tracks": tracks,
+        "total": if total > 0 { total } else { count },
+        "limited": limited,
+    }))
+}
+
+async fn playlist_import(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let url = qp(&q, "url");
+    if parse_spotify_playlist_id(&url).is_some() {
+        return spotify_import(State(state), Query(q)).await;
+    }
+    // YouTube / SoundCloud playlists via yt-dlp flat extraction
+    let args = vec![
+        "-J".to_string(),
+        "--flat-playlist".to_string(),
+        "--no-warnings".to_string(),
+        url.clone(),
+    ];
+    let out = match run_yt_dlp(&state, &args, 90) {
+        Ok(o) => o,
+        Err(e) => return json_ok(json!({ "success": false, "error": e })),
+    };
+    let info: Value = match serde_json::from_str(&out) {
+        Ok(v) => v,
+        Err(e) => return json_ok(json!({ "success": false, "error": format!("yt-dlp output parse error: {e}") })),
+    };
+    let entries = info.get("entries").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let tracks: Vec<Value> = entries
+        .iter()
+        .filter_map(|item| {
+            let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if id.is_empty() {
+                return None;
+            }
+            let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string();
+            let artist = item
+                .get("uploader")
+                .or_else(|| item.get("channel"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown artist")
+                .to_string();
+            let duration = item.get("duration").and_then(|v| v.as_f64()).unwrap_or(0.0) as u64;
+            let thumb = item
+                .get("thumbnails")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.last().cloned())
+                .and_then(|t| t.get("url").and_then(|u| u.as_str()).map(|s| s.to_string()))
+                .or_else(|| item.get("thumbnail").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                .unwrap_or_default();
+            let url = item
+                .get("webpage_url")
+                .or_else(|| item.get("url"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("https://www.youtube.com/watch?v={id}"));
+            Some(json!({
+                "id": id,
+                "title": title,
+                "artist": artist,
+                "duration": duration,
+                "thumbnail": thumb,
+                "cover": thumb,
+                "url": url,
+                "platform": "ytmusic",
+            }))
+        })
+        .collect();
+    if tracks.is_empty() {
+        return json_ok(json!({ "success": false, "error": "No tracks found in this playlist" }));
+    }
+    let name = info
+        .get("title")
+        .or_else(|| info.get("playlist_title"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("Playlist")
+        .to_string();
+    let cover = entries
+        .first()
+        .and_then(|item| item.get("thumbnails").and_then(|v| v.as_array()).and_then(|arr| arr.last().cloned()))
+        .and_then(|t| t.get("url").and_then(|u| u.as_str()).map(|s| s.to_string()))
+        .unwrap_or_default();
+    json_ok(json!({ "success": true, "name": name, "cover": cover, "tracks": tracks, "total": tracks.len() }))
+}
+
 // ------------------------------------------------------------------ stubs
 
 async fn stub_unported(Query(q): Query<HashMap<String, String>>) -> Response {
@@ -993,8 +1412,8 @@ pub fn build_router(state: Shared) -> Router {
         .route("/api/track-cover", get(stub_unported))
         .route("/api/track-credits", get(stub_unported))
         .route("/api/check-playlist-unavailable", post(stub_empty_list))
-        .route("/api/playlist-import", get(stub_empty_list).post(stub_empty_list))
-        .route("/api/spotify-import", get(stub_empty_list).post(stub_empty_list))
+        .route("/api/playlist-import", get(playlist_import).post(playlist_import))
+        .route("/api/spotify-import", get(spotify_import).post(spotify_import))
         .route("/api/apple-import", get(stub_empty_list).post(stub_empty_list))
         .route("/api/yandex-import", get(stub_empty_list).post(stub_empty_list))
         .route("/api/tiktok-import", get(stub_empty_list).post(stub_empty_list))

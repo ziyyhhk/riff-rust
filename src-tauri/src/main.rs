@@ -24,6 +24,12 @@ fn main() {
     let download_dir = config.get("downloadDir").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let storage_snapshot = util::read_json_file(&util::storage_path());
 
+    // First run? (tutorial marker mirrors upstream's .rifftutorial)
+    let first_run = std::fs::read_to_string(util::data_dir().join(".rifftutorial"))
+        .map(|s| s.trim() != env!("CARGO_PKG_VERSION"))
+        .unwrap_or(true);
+    util::log_line("INFO", &format!("first run: {first_run}"));
+
     // Embedded localhost API
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind embedded server");
     // Tokio's IOCP/mio registration expects the std listener in nonblocking mode.
@@ -123,14 +129,16 @@ fn main() {
             commands::get_app_css,
         ])
         .setup(move |app| {
-            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+            let start_url = if first_run { "welcome.html" } else { "index.html" };
+            let bg = if first_run { tauri::window::Color(141, 94, 242, 255) } else { tauri::window::Color(0, 0, 0, 255) };
+            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App(start_url.into()))
                 .title("Riff Rust")
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(800.0, 540.0)
                 .decorations(false)
                 .resizable(true)
                 .center()
-                .background_color(tauri::window::Color(0, 0, 0, 255))
+                .background_color(bg)
                 .initialization_script(&boot)
                 .build()?;
 

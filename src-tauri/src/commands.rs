@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::state::AppState;
 use crate::util;
@@ -346,17 +346,111 @@ pub fn media_keys_active(state: State<'_, Shared>) -> bool {
     state.media_keys.lock().map(|v| *v).unwrap_or(false)
 }
 
+/// Windows: Start Menu Programs shortcut for the app (upstream's launcher feature).
+#[cfg(target_os = "windows")]
+fn launcher_shortcut_path() -> std::path::PathBuf {
+    let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(appdata).join("Microsoft\\Windows\\Start Menu\\Programs\\Riff Rust.lnk")
+}
+
+#[cfg(target_os = "windows")]
+fn do_install_launcher() -> bool {
+    let exe = match std::env::current_exe() {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
+    let shortcut = launcher_shortcut_path();
+    if let Some(parent) = shortcut.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let script = format!(
+        "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}');$s.TargetPath='{}';$s.IconLocation='{},0';$s.Description='Riff Rust - music player';$s.Save()",
+        shortcut.display(),
+        exe.display(),
+        exe.display()
+    );
+    std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "windows")]
+fn launcher_installed() -> bool {
+    launcher_shortcut_path().exists()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn do_install_launcher() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+fn launcher_installed() -> bool {
+    false
+}
+
 #[tauri::command]
-pub fn welcome_finish(_detail: serde_json::Value) {}
+pub fn welcome_finish(detail: serde_json::Value, app: AppHandle) -> bool {
+    // Mark the tutorial done so the next launch skips the wizard (mirrors upstream).
+    let marker = util::data_dir().join(".rifftutorial");
+    let _ = fs::write(&marker, env!("CARGO_PKG_VERSION"));
+
+    if detail.get("launcher").and_then(|v| v.as_bool()).unwrap_or(false) {
+        let ok = do_install_launcher();
+        util::log_line("INFO", &format!("launcher install: {}", if ok { "ok" } else { "failed" }));
+    }
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 255)));
+        let _ = window.eval("window.location.replace('index.html')");
+    }
+
+    // Notify the app once its listener is registered (mirrors upstream's did-finish-load reply).
+    if !detail.get("skipped").and_then(|v| v.as_bool()).unwrap_or(false) {
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(1200));
+            if let Err(e) = app.emit("welcome-result", detail) {
+                util::log_line("WARN", &format!("welcome-result emit failed: {e}"));
+            }
+        });
+    }
+    true
+}
 
 #[tauri::command]
 pub fn get_launcher_info() -> serde_json::Value {
-    serde_json::json!({ "installed": false, "supported": false, "version": "" })
+    #[cfg(target_os = "windows")]
+    {
+        serde_json::json!({
+            "installed": launcher_installed(),
+            "supported": true,
+            "canInstall": true,
+            "reason": "",
+            "version": env!("CARGO_PKG_VERSION"),
+        })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        serde_json::json!({
+            "installed": false,
+            "supported": false,
+            "canInstall": false,
+            "reason": "Only the Windows Start Menu launcher is wired up in Riff Rust v0.1",
+            "version": env!("CARGO_PKG_VERSION"),
+        })
+    }
 }
 
 #[tauri::command]
 pub fn install_launcher() -> serde_json::Value {
-    serde_json::json!({ "success": false, "error": "launcher integration is not part of Riff Rust v0.1" })
+    let ok = do_install_launcher();
+    serde_json::json!({
+        "success": ok,
+        "installed": ok || launcher_installed(),
+        "error": if ok { serde_json::Value::Null } else { serde_json::json!("could not create the Start Menu shortcut") },
+    })
 }
 
 #[tauri::command]
