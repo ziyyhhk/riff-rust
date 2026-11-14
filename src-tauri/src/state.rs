@@ -1,6 +1,6 @@
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Saved geometry while the main window is in mini-player mode.
@@ -81,6 +81,12 @@ pub struct AppState {
     pub pending_welcome_result: Mutex<Option<Value>>,
     /// Background installer progress (yt-dlp/ffmpeg) reported to the renderer.
     pub tool_install: Mutex<ToolInstallState>,
+    /// Discord Rich Presence bridge (named pipe \?\pipe\discord-ipc-N).
+    pub discord: Arc<crate::discord_rpc::DiscordRpc>,
+    /// LRCLIB lyric responses (24h TTL).
+    pub lyrics_cache: Mutex<HashMap<String, (Instant, Value)>>,
+    /// Word-level (NetEase yrc) lyric responses (6h pos / 10min neg).
+    pub lyrics_words_cache: Mutex<HashMap<String, (Instant, Value)>>,
 }
 
 impl AppState {
@@ -105,6 +111,9 @@ impl AppState {
             last_window_save: Mutex::new(Instant::now()),
             pending_welcome_result: Mutex::new(None),
             tool_install: Mutex::new(ToolInstallState::default()),
+            discord: Arc::new(crate::discord_rpc::DiscordRpc::new()),
+            lyrics_cache: Mutex::new(HashMap::new()),
+            lyrics_words_cache: Mutex::new(HashMap::new()),
         }
     }
 

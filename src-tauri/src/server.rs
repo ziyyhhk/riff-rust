@@ -993,18 +993,6 @@ async fn proxy_test(State(_state): State<Shared>, Json(body): Json<Value>) -> Re
 
 // ------------------------------------------------------------------ lyrics
 
-fn custom_lyrics_path(artist: &str, title: &str) -> Option<PathBuf> {
-    let safe = |s: &str| s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == ' ' { c } else { '_' }).collect::<String>();
-    let dir = util::data_dir().join("custom-lyrics");
-    for ext in ["lrc", "txt"] {
-        let p = dir.join(format!("{} - {}.{ext}", safe(artist).trim(), safe(title).trim()));
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    None
-}
-
 async fn save_custom_lyrics(State(_state): State<Shared>, Json(body): Json<Value>) -> Response {
     let title = body.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     let artist = body.get("artist").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
@@ -1023,86 +1011,11 @@ async fn save_custom_lyrics(State(_state): State<Shared>, Json(body): Json<Value
 }
 
 async fn lyrics(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
-    let title = qp(&q, "title");
-    let artist = qp(&q, "artist");
-    let duration = qp(&q, "duration");
-    let online = qp(&q, "online");
-
-    // custom lyrics first
-    if let Some(path) = custom_lyrics_path(&artist, &title) {
-        if let Ok(text) = fs::read_to_string(&path) {
-            return json_ok(json!({ "success": true, "lyrics": text, "isCustom": true, "source": "custom" }));
-        }
-    }
-    if online == "0" {
-        return json_ok(json!({ "success": false, "error": "offline mode", "lyrics": "" }));
-    }
-    if title.is_empty() && artist.is_empty() {
-        return json_ok(json!({ "success": false, "error": "missing title and artist" }));
-    }
-
-    let client = http_client(&state);
-    let mut artist_q = artist.clone();
-    let mut title_q = title.clone();
-    if artist_q.is_empty() {
-        artist_q = title.clone();
-    }
-    if title_q.is_empty() {
-        title_q = artist.clone();
-    }
-
-    // Exact lookup first, then fuzzy search
-    let mut url = format!(
-        "https://lrclib.net/api/get?artist_name={}&track_name={}",
-        crate::util::percent_encode(&artist_q),
-        crate::util::percent_encode(&title_q)
-    );
-    if let Ok(d) = duration.parse::<f64>() {
-        if d > 0.0 {
-            url.push_str(&format!("&duration={d}"));
-        }
-    }
-    let mut result = client.get(&url).send().await.ok().filter(|r| r.status().is_success());
-    if result.is_none() {
-        let search_url = format!(
-            "https://lrclib.net/api/search?q={}",
-            crate::util::percent_encode(&format!("{artist_q} {title_q}"))
-        );
-        if let Ok(resp) = client.get(&search_url).send().await {
-            if resp.status().is_success() {
-                if let Ok(items) = resp.json::<Vec<Value>>().await {
-                    // take the first non-instrumental hit
-                    if let Some(best) = items.iter().find(|i| i.get("instrumental").and_then(|v| v.as_bool()) != Some(true)).or_else(|| items.first()) {
-                        return lyrics_payload(best.clone());
-                    }
-                }
-            }
-        }
-        return json_ok(json!({ "success": false, "error": "no lyrics found" }));
-    }
-    if let Some(resp) = result.take() {
-        if let Ok(body) = resp.json::<Value>().await {
-            return lyrics_payload(body);
-        }
-    }
-    json_ok(json!({ "success": false, "error": "lyrics lookup failed" }))
+    json_ok(crate::lyrics::lyrics(&state, &q).await)
 }
 
-fn lyrics_payload(item: Value) -> Response {
-    let synced = item.get("syncedLyrics").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let plain = item.get("plainLyrics").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let lyrics_text = if !synced.is_empty() { synced.clone() } else { plain.clone() };
-    if lyrics_text.is_empty() {
-        return json_ok(json!({ "success": false, "error": "no lyrics found" }));
-    }
-    json_ok(json!({
-        "success": true,
-        "lyrics": lyrics_text,
-        "syncedLyrics": synced,
-        "plainLyrics": plain,
-        "isCustom": false,
-        "source": "lrclib",
-    }))
+async fn lyrics_words(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
+    json_ok(crate::lyrics::lyrics_words(&state, &q).await)
 }
 
 // ------------------------------------------------------------- media proxy
@@ -1165,7 +1078,7 @@ async fn audio_proxy(State(state): State<Shared>, Query(q): Query<HashMap<String
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("audio/mp4")
                 .to_string();
-            // Forward length/range metadata — WebView2's media pipeline needs
+            // Forward length/range metadata â€” WebView2's media pipeline needs
             // them to demux MP4 progressively; without Content-Range the
             // element reports MEDIA_ERR_SRC_NOT_SUPPORTED ("Format error").
             let content_length = resp.content_length();
@@ -1736,7 +1649,7 @@ pub fn build_router(state: Shared) -> Router {
         .route("/api/lastfm/now-playing", get(stub_unported))
         .route("/api/lastfm/scrobble", post(stub_unported))
         .route("/api/lastfm/{*rest}", get(stub_unported).post(stub_unported))
-        .route("/api/lyrics-words", get(stub_unported))
+        .route("/api/lyrics-words", get(lyrics_words))
         .route("/api/translate", post(stub_unported))
         .route("/api/i18n-batch", post(stub_unported))
         .route("/api/devsize-memes", get(stub_unported))

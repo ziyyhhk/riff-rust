@@ -323,35 +323,36 @@ pub fn rescan_local_metadata(paths: Option<Vec<String>>) -> bool {
 }
 
 // ------------------------------------------------------------- discord RPC
-// Not yet wired: Riff Rust v0.1 keeps the toggle state but reports
-// disconnected. See PORTING.md.
 
 #[tauri::command]
-pub fn discord_rpc_update(_track_info: serde_json::Value, state: State<'_, Shared>) {
-    let _ = state;
+pub fn discord_rpc_update(track_info: serde_json::Value, state: State<'_, Shared>) {
+    state.discord.set_activity(track_info);
 }
 
 #[tauri::command]
-pub fn discord_rpc_clear() {}
-
-#[tauri::command]
-pub fn discord_rpc_set_enabled(enabled: bool) -> bool {
-    enabled
+pub fn discord_rpc_clear(state: State<'_, Shared>) {
+    state.discord.clear_activity();
 }
 
 #[tauri::command]
-pub fn discord_rpc_get_enabled() -> bool {
-    false
+pub fn discord_rpc_set_enabled(enabled: bool, state: State<'_, Shared>) -> bool {
+    state.discord.set_enabled(enabled)
 }
 
 #[tauri::command]
-pub fn discord_rpc_get_connected() -> bool {
-    false
+pub fn discord_rpc_get_enabled(state: State<'_, Shared>) -> bool {
+    state.discord.is_enabled()
 }
 
 #[tauri::command]
-pub fn discord_rpc_reconnect() -> bool {
-    false
+pub fn discord_rpc_get_connected(state: State<'_, Shared>) -> bool {
+    state.discord.is_connected()
+}
+
+#[tauri::command]
+pub fn discord_rpc_reconnect(state: State<'_, Shared>) -> bool {
+    state.discord.reconnect();
+    true
 }
 
 // ------------------------------------------------------------------- cache
