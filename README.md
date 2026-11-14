@@ -173,13 +173,13 @@ npm run assemble   # flatten src/renderer + assets + vendor into web/
 npm run build      # cargo tauri build -> NSIS .exe installer in src-tauri/target/release/bundle/nsis/
 ```
 
-Runtime needs `yt-dlp` (auto-downloads on first run from the official release) and, for downloads/conversion, `ffmpeg` (e.g. `winget install Gyan.FFmpeg`). Streaming works without ffmpeg.
+Runtime needs `yt-dlp` and `ffmpeg` (both auto-download on first run from the official releases, SHA-256 verified; ~200 MB total). Streaming works without ffmpeg.
 
 The exact build output depends on the current project configuration.
 
 ## Memory usage
 
-Upstream Riff (Electron) typically uses ~180 MB steady-state and only counts as a leak above 600 MB. Riff Rust ships no bundled Chromium at all (the OS webview renders the same UI), so its footprint is expected to be substantially lower. Please measure on your machine; reproducible numbers will be published here once we have them.
+Upstream Riff (Electron) typically uses ~180 MB steady-state and only counts as a leak above 600 MB. Riff Rust ships no bundled Chromium; it uses the OS WebView2 instead. A measured whole-process tree (`riff-rust.exe` + all `msedgewebview2.exe` children) idling at the home screen used ~310 MB private bytes and ~517 MB working set on one Windows machine — roughly the same order as Electron; the clear win is disk (5 MB installer vs ~200 MB). No side-by-side numbers against upstream on the same playback scenario have been published yet; use `npm run measure` yourself.
 
 ## Mobile versions
 

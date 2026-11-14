@@ -159,7 +159,16 @@
 
     // --- welcome ---
     welcomeFinish: (detail) => invoke('welcome_finish', { detail }),
-    onWelcomeResult: (cb) => onEvent('welcome-result', cb),
+    onWelcomeResult: (cb) => {
+      let delivered = false;
+      const once = (detail) => {
+        if (delivered || !detail) return;
+        delivered = true;
+        cb(detail);
+      };
+      onEvent('welcome-result', once);
+      invoke('take_welcome_result').then(once).catch(() => {});
+    },
 
     // --- themes ---
     listThemes: () => invoke('list_themes'),

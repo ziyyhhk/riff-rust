@@ -1,12 +1,113 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State};
+use tauri_plugin_global_shortcut::{
+    Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutEvent, ShortcutState,
+};
 
-use crate::state::AppState;
+use crate::state::{AppState, MiniWindowState};
 use crate::util;
 
 type Shared = Arc<AppState>;
+
+// -------------------------------------------------------- global shortcuts
+
+fn command_or_control(modifiers: Modifiers) -> bool {
+    modifiers.contains(Modifiers::CONTROL) || modifiers.contains(Modifiers::SUPER)
+}
+
+/// Central handler for media keys and the app's global shortcuts. Mirrors upstream:
+/// media keys send `media-command`, custom accelerators send `media-control`.
+pub fn handle_shortcut(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
+    if event.state != ShortcutState::Pressed {
+        return;
+    }
+    match shortcut.key {
+        Code::MediaPlayPause => {
+            let _ = app.emit("media-command", "toggle");
+        }
+        Code::MediaTrackNext => {
+            let _ = app.emit("media-command", "next");
+        }
+        Code::MediaTrackPrevious => {
+            let _ = app.emit("media-command", "prev");
+        }
+        Code::MediaStop => {
+            let _ = app.emit("media-command", "stop");
+        }
+        Code::Space
+            if command_or_control(shortcut.mods) && shortcut.mods.contains(Modifiers::SHIFT) =>
+        {
+            let _ = app.emit("media-control", "play-pause");
+        }
+        Code::ArrowRight
+            if command_or_control(shortcut.mods) && shortcut.mods.contains(Modifiers::SHIFT) =>
+        {
+            let _ = app.emit("media-control", "next");
+        }
+        Code::ArrowLeft
+            if command_or_control(shortcut.mods) && shortcut.mods.contains(Modifiers::SHIFT) =>
+        {
+            let _ = app.emit("media-control", "prev");
+        }
+        Code::ArrowUp
+            if command_or_control(shortcut.mods) && shortcut.mods.contains(Modifiers::SHIFT) =>
+        {
+            let _ = app.emit("media-control", "seek-forward");
+        }
+        Code::ArrowDown
+            if command_or_control(shortcut.mods) && shortcut.mods.contains(Modifiers::SHIFT) =>
+        {
+            let _ = app.emit("media-control", "seek-back");
+        }
+        _ => {}
+    }
+}
+
+/// Re-register everything after a settings change. Unregistering first makes this
+/// idempotent and avoids "already registered" errors when the renderer calls twice.
+pub fn sync_hotkeys(app: &AppHandle, state: &AppState) {
+    let shortcuts = app.global_shortcut();
+    if let Err(e) = shortcuts.unregister_all() {
+        util::log_line("WARN", &format!("could not clear global shortcuts: {e}"));
+    }
+
+    if state.media_keys_wanted() {
+        for key in [
+            "MediaPlayPause",
+            "MediaTrackNext",
+            "MediaTrackPrevious",
+            "MediaStop",
+        ] {
+            if let Err(e) = shortcuts.register(key) {
+                util::log_line("WARN", &format!("could not register media key {key}: {e}"));
+            }
+        }
+    }
+
+    let enabled = state
+        .global_shortcuts
+        .lock()
+        .map(|value| *value)
+        .unwrap_or(false);
+    if enabled {
+        for accelerator in [
+            "CommandOrControl+Shift+Space",
+            "CommandOrControl+Shift+Right",
+            "CommandOrControl+Shift+Left",
+            "CommandOrControl+Shift+Up",
+            "CommandOrControl+Shift+Down",
+        ] {
+            if let Err(e) = shortcuts.register(accelerator) {
+                util::log_line(
+                    "WARN",
+                    &format!("could not register global shortcut {accelerator}: {e}"),
+                );
+            }
+        }
+    }
+}
 
 // ---------------------------------------------------------------- windowing
 
@@ -46,12 +147,104 @@ pub fn set_window_buttons_visible(_visible: bool) -> bool {
 }
 
 #[tauri::command]
-pub fn toggle_mini_window() -> bool {
-    false
+pub fn toggle_mini_window(app: AppHandle, state: State<'_, Shared>) -> bool {
+    let Some(window) = app.get_webview_window("main") else {
+        return false;
+    };
+    let mut mini = match state.mini.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if mini.is_none() {
+        let scale = window.scale_factor().unwrap_or(1.0).max(0.5);
+        let inner = window
+            .inner_size()
+            .unwrap_or(tauri::PhysicalSize::new(1280, 800));
+        let position = window
+            .outer_position()
+            .unwrap_or(PhysicalPosition::new(0, 0));
+        *mini = Some(MiniWindowState {
+            width: inner.width as f64 / scale,
+            height: inner.height as f64 / scale,
+            x: position.x,
+            y: position.y,
+            maximized: window.is_maximized().unwrap_or(false),
+        });
+        let _ = window.unmaximize();
+        let _ = window.set_min_size(Some(tauri::Size::Logical(LogicalSize::new(280.0, 115.0))));
+        let _ = window.set_size(LogicalSize::new(380.0, 160.0));
+        let _ = window.set_always_on_top(true);
+        true
+    } else {
+        let saved = mini.take();
+        let _ = window.set_always_on_top(false);
+        let _ = window.set_min_size(Some(tauri::Size::Logical(LogicalSize::new(800.0, 540.0))));
+        if let Some(saved) = saved {
+            let _ = window.set_size(LogicalSize::new(saved.width, saved.height));
+            let _ = window.set_position(PhysicalPosition::new(saved.x, saved.y));
+            if saved.maximized {
+                let _ = window.maximize();
+            }
+        }
+        if let Ok(mut height) = state.mini_lyrics_height.lock() {
+            *height = None;
+        }
+        false
+    }
 }
 
 #[tauri::command]
-pub fn set_mini_lyrics(_enabled: bool) -> bool {
+pub fn set_mini_lyrics(enabled: bool, app: AppHandle, state: State<'_, Shared>) -> bool {
+    let Some(window) = app.get_webview_window("main") else {
+        return false;
+    };
+    let is_mini = state
+        .mini
+        .lock()
+        .map(|guard| guard.is_some())
+        .unwrap_or(false);
+    if !is_mini {
+        return false;
+    }
+    let scale = window.scale_factor().unwrap_or(1.0).max(0.5);
+    let size = window
+        .inner_size()
+        .unwrap_or(tauri::PhysicalSize::new(380, 160));
+    let width = size.width as f64 / scale;
+    let current_height = size.height as f64 / scale;
+    if enabled {
+        if let Ok(mut height) = state.mini_lyrics_height.lock() {
+            if height.is_none() {
+                *height = Some(current_height);
+            }
+        }
+        let _ = window.set_min_size(Some(tauri::Size::Logical(LogicalSize::new(320.0, 240.0))));
+        let monitor = window.current_monitor().ok().flatten();
+        let max_height = monitor
+            .as_ref()
+            .map(|m| m.size().height as f64 / scale * 0.9)
+            .unwrap_or(900.0);
+        let target = current_height.max(360.0).min(max_height.max(240.0));
+        let _ = window.set_size(LogicalSize::new(width, target));
+        if let (Ok(position), Some(monitor)) = (window.outer_position(), monitor) {
+            let top = monitor.position().y as f64;
+            let bottom = top + monitor.size().height as f64;
+            let target_px = target * scale;
+            if position.y as f64 + target_px > bottom {
+                let y = (bottom - target_px).max(top) as i32;
+                let _ = window.set_position(PhysicalPosition::new(position.x, y));
+            }
+        }
+    } else {
+        let _ = window.set_min_size(Some(tauri::Size::Logical(LogicalSize::new(320.0, 140.0))));
+        let restore = state
+            .mini_lyrics_height
+            .lock()
+            .ok()
+            .and_then(|mut height| height.take())
+            .unwrap_or(160.0);
+        let _ = window.set_size(LogicalSize::new(width, restore.max(140.0)));
+    }
     true
 }
 
@@ -328,22 +521,28 @@ pub fn get_global_shortcuts(state: State<'_, Shared>) -> bool {
 }
 
 #[tauri::command]
-pub fn set_global_shortcuts(v: bool, state: State<'_, Shared>) {
-    if let Ok(mut m) = state.global_shortcuts.lock() {
-        *m = v;
+pub fn set_global_shortcuts(v: bool, app: AppHandle, state: State<'_, Shared>) {
+    if let Ok(mut enabled) = state.global_shortcuts.lock() {
+        *enabled = v;
     }
+    sync_hotkeys(&app, &state);
 }
 
 #[tauri::command]
-pub fn set_media_keys(v: bool, state: State<'_, Shared>) {
-    if let Ok(mut m) = state.media_keys.lock() {
-        *m = v;
+pub fn set_media_keys(v: bool, app: AppHandle, state: State<'_, Shared>) {
+    if let Ok(mut enabled) = state.media_keys.lock() {
+        *enabled = v;
     }
+    sync_hotkeys(&app, &state);
 }
 
 #[tauri::command]
-pub fn media_keys_active(state: State<'_, Shared>) -> bool {
-    state.media_keys.lock().map(|v| *v).unwrap_or(false)
+pub fn media_keys_active(app: AppHandle, state: State<'_, Shared>) -> bool {
+    if let Ok(mut active) = state.media_keys_active.lock() {
+        *active = true;
+    }
+    sync_hotkeys(&app, &state);
+    state.media_keys_wanted()
 }
 
 /// Windows: Start Menu Programs shortcut for the app (upstream's launcher feature).
@@ -404,19 +603,31 @@ pub fn welcome_finish(detail: serde_json::Value, app: AppHandle) -> bool {
 
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 255)));
+        let pending = if detail.get("skipped").and_then(|v| v.as_bool()).unwrap_or(false) {
+            None
+        } else {
+            Some(detail.clone())
+        };
+        if let Ok(mut slot) = app.state::<Shared>().pending_welcome_result.lock() {
+            *slot = pending;
+        }
+        // app.js pulls this once its onWelcomeResult listener is registered, which is
+        // the reliable equivalent of upstream's once('did-finish-load').
         let _ = window.eval("window.location.replace('index.html')");
     }
 
-    // Notify the app once its listener is registered (mirrors upstream's did-finish-load reply).
-    if !detail.get("skipped").and_then(|v| v.as_bool()).unwrap_or(false) {
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(1200));
-            if let Err(e) = app.emit("welcome-result", detail) {
-                util::log_line("WARN", &format!("welcome-result emit failed: {e}"));
-            }
-        });
-    }
     true
+}
+
+/// One-shot pull used by the renderer after index.html loads. Returns the wizard
+/// choices exactly once, so a reload cannot replay onboarding side effects.
+#[tauri::command]
+pub fn take_welcome_result(state: State<'_, Shared>) -> Option<serde_json::Value> {
+    state
+        .pending_welcome_result
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take())
 }
 
 #[tauri::command]

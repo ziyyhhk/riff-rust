@@ -1,6 +1,6 @@
 {
   "name": "riff-rust",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "productName": "Riff Rust",
   "description": "Riff Rust - a fast, low-memory desktop music player for YouTube Music, SoundCloud and local files, rebuilt in Rust (Tauri). Fork of Riff (MIT).",
@@ -14,6 +14,9 @@
     "assemble": "powershell -ExecutionPolicy Bypass -File scripts/assemble.ps1",
     "dev": "npm run assemble && npx tauri dev",
     "build": "npm run assemble && npx tauri build",
+    "clean": "powershell -ExecutionPolicy Bypass -File scripts/clean.ps1",
+    "clean:all": "powershell -ExecutionPolicy Bypass -File scripts/clean.ps1 -All",
+    "measure": "powershell -ExecutionPolicy Bypass -File scripts/measure.ps1",
     "test": "node --test"
   },
   "devDependencies": {

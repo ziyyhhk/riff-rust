@@ -4,6 +4,18 @@ use std::path::PathBuf;
 
 use crate::util;
 
+pub const AUDIO_EXT: [&str; 10] = ["mp3", "wav", "flac", "opus", "ogg", "oga", "m4a", "aac", "webm", "weba"];
+
+/// Track ids come from query strings and are used to build file paths, so keep them
+/// to a conservative charset. Without this a crafted id could escape the cache dir.
+fn safe_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 pub fn load_library() -> Vec<Value> {
     match util::read_json_file(&util::library_path()) {
         Value::Array(items) => items,
@@ -18,24 +30,27 @@ pub fn save_library(tracks: &[Value]) {
 
 pub fn find_track_by_id(id: &str) -> Option<PathBuf> {
     let clean = id.trim();
-    // `local_<hash>` ids map to `library/<id>.<ext>`
+    if !safe_id(clean) {
+        return None;
+    }
+    // `local_<hash>` / `riff-<hash>` ids map to `library/<id>.<ext>`.
+    // Probe the known extensions directly instead of read_dir()-ing the whole library
+    // on every range request (audio players issue a lot of them while seeking).
     if clean.starts_with("local_") || clean.starts_with("riff-") {
-        if let Ok(entries) = fs::read_dir(util::library_dir()) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with(clean) {
-                    return Some(entry.path());
-                }
+        for ext in AUDIO_EXT {
+            let path = util::library_dir().join(format!("{clean}.{ext}"));
+            if path.is_file() {
+                return Some(path);
             }
         }
-        // Also check the download cache (yt-dlp output `<id>.<ext>`)
-        if let Ok(entries) = fs::read_dir(util::cache_dir()) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with(clean) {
-                    return Some(entry.path());
-                }
-            }
+    }
+    // yt-dlp download cache uses the bare video id: `tracks/<id>.<ext>`.
+    // This also used to be gated behind the local_/riff- prefix, so downloaded
+    // songs were re-resolved over the network every time they played.
+    for ext in AUDIO_EXT {
+        let path = util::cache_dir().join(format!("{clean}.{ext}"));
+        if path.is_file() {
+            return Some(path);
         }
     }
     None
@@ -48,7 +63,6 @@ pub fn find_cached_by_id(id: &str) -> Option<PathBuf> {
 /// Copy audio files into the library dir and return display-ready items
 /// (same shape the Electron importer produced: {id, file, ext, name}).
 pub fn import_audio_files(paths: &[String]) -> Vec<Value> {
-    const AUDIO_EXT: [&str; 10] = ["mp3", "wav", "flac", "opus", "ogg", "oga", "m4a", "aac", "webm", "weba"];
     let mut sources: Vec<PathBuf> = Vec::new();
     for p in paths {
         let path = PathBuf::from(p);

@@ -57,6 +57,11 @@ pub fn config_path() -> PathBuf {
 pub fn storage_path() -> PathBuf {
     data_dir().join("storage.json")
 }
+
+/// Window geometry, same JSON shape as upstream Electron (`bounds`/`isMaximized`/`isFullScreen`).
+pub fn window_state_path() -> PathBuf {
+    data_dir().join("window-state.json")
+}
 pub fn playlists_path() -> PathBuf {
     data_dir().join("playlists.json")
 }
@@ -212,18 +217,102 @@ pub fn mime_from_ext(ext: &str) -> &'static str {
     }
 }
 
-/// Write to the app log (best effort).
-pub fn log_line(level: &str, message: &str) {    let dir = logs_dir();
+const LOG_MAX_BYTES: u64 = 4 * 1024 * 1024;
+const LOG_FILES: usize = 3;
+
+/// Serializes rotation + append so concurrent log writers cannot rotate twice.
+static LOG_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+
+fn rotate_log_file(path: &PathBuf) {
+    let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    if size < LOG_MAX_BYTES {
+        return;
+    }
+    // riff-rust.log.2 -> .3, .1 -> .2, base -> .1. Windows rename fails when the
+    // destination exists, so remove it first.
+    for index in (1..LOG_FILES).rev() {
+        let from = PathBuf::from(format!("{}.{index}", path.to_string_lossy()));
+        if !from.exists() {
+            continue;
+        }
+        let to = PathBuf::from(format!("{}.{}", path.to_string_lossy(), index + 1));
+        let _ = fs::remove_file(&to);
+        let _ = fs::rename(from, to);
+    }
+    let backup = PathBuf::from(format!("{}.1", path.to_string_lossy()));
+    let _ = fs::remove_file(&backup);
+    let _ = fs::rename(path, backup);
+}
+
+/// Write to the app log (best effort), rotating at 4 MB and keeping three old files.
+pub fn log_line(level: &str, message: &str) {
+    let _guard = LOG_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dir = logs_dir();
     let _ = fs::create_dir_all(&dir);
+    let path = dir.join("riff-rust.log");
+    rotate_log_file(&path);
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let line = format!("[{stamp}] [{level}] {message}\n");
-    let _ = fs::OpenOptions::new().create(true).append(true).open(dir.join("riff-rust.log")).map(|mut f| {
-        use std::io::Write;
-        let _ = f.write_all(line.as_bytes());
-    });
+    let _ = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map(|mut f| {
+            use std::io::Write;
+            let _ = f.write_all(line.as_bytes());
+        });
+}
+
+/// Optional disk guard for the stream/download cache. `config.json` may set
+/// `"cacheLimitMB": <n>`; 0/absent keeps the upstream behaviour (no automatic deletion),
+/// because these files are also the user's offline library.
+pub fn prune_cache_limit() -> u64 {
+    let config = read_json_file(&config_path());
+    let limit_mb = config
+        .get("cacheLimitMB")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    if limit_mb == 0 {
+        return 0;
+    }
+    let limit = limit_mb.saturating_mul(1024 * 1024);
+    let dir = cache_dir();
+    let mut files: Vec<(std::time::SystemTime, u64, PathBuf)> = Vec::new();
+    let mut total = 0u64;
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            if let Ok(meta) = path.metadata() {
+                let modified = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                files.push((modified, meta.len(), path));
+                total += meta.len();
+            }
+        }
+    }
+    if total <= limit {
+        return 0;
+    }
+    files.sort_by_key(|(modified, _, _)| *modified);
+    // Trim to 90% of the cap so we do not run this on every launch.
+    let target = limit.saturating_mul(9) / 10;
+    let mut freed = 0u64;
+    for (_, size, path) in files {
+        if total <= target {
+            break;
+        }
+        if fs::remove_file(&path).is_ok() {
+            total = total.saturating_sub(size);
+            freed += size;
+        }
+    }
+    freed
 }
 
 /// Percent-encode a full string (for building outbound URLs).

@@ -15,8 +15,10 @@ A from-scratch rebuild of [Riff](https://github.com/rootscripts/riff) (Electron 
 | Path | What it is |
 |---|---|
 | `src/renderer/` | The UI. `app.js` (~44k lines) is upstream; `electron-shim.js` is ours. |
-| `src-tauri/src/` | Rust: `main.rs` (window/tray/boot), `server.rs` (embedded API), `commands.rs` (Tauri IPC), `library.rs` (import/tags via lofty), `state.rs`, `util.rs` |
+| `src-tauri/src/` | Rust: `main.rs` (window/tray/boot), `server.rs` (embedded API), `tools.rs` (yt-dlp/ffmpeg auto-install), `commands.rs` (Tauri IPC), `library.rs` (import/tags via lofty), `ytm.rs` (YouTube Music inner-API search), `state.rs` (shared client/caches), `util.rs` |
 | `scripts/assemble.ps1` | Flattens renderer + assets + vendor into `web/`, rewrites `../../assets/` refs, injects `electron-shim.js` into the HTML. **Edit sources in `src/renderer`, never `web/` (build artifact).** |
+| `scripts/clean.ps1` | Disk cleanup (`npm run clean`, `npm run clean:all`). |
+| `scripts/measure.ps1` | RAM/CPU sampling (`npm run measure`). |
 | `PORTING.md` | Authoritative feature status. Keep it updated. |
 | `release/` | Installer artifacts (gitignored). |
 
@@ -28,7 +30,16 @@ npm run assemble
 npm run build    # -> src-tauri/target/release/bundle/nsis/
 ```
 
+Release profile (`src-tauri/Cargo.toml`): `lto = true`, `codegen-units = 1`, `opt-level = 3`,
+`panic = "abort"`, `strip = true` — a cold build is slow (~15–25 min), but the shipped binary is
+maximally optimized. Don't bump `opt-level` past 3; `s` saves little and costs hot paths.
+
 Windows needs: Node 18+, Rust (MSVC), WebView2 (already on Win10/11). First run auto-downloads yt-dlp; ffmpeg via `winget install Gyan.FFmpeg`.
+
+`npm run clean` removes `web/`, `release/`, app logs, and `src-tauri/target/debug/`
+(check/test artifacts, usually the biggest folder); `npm run clean:all` also removes
+`node_modules/` and all of `src-tauri/target/` (next build is cold, ~10–15 min).
+`npm run measure` reports root and whole-process-tree RAM/CPU (WebView2 children included).
 
 Release process used for v0.1.x: bump `version` in `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`; commit; tag; `gh release create` with the NSIS `.exe`. Repo: `ziyyhhk/riff-rust` (public, prereleases).
 
@@ -38,13 +49,32 @@ Release process used for v0.1.x: bump `version` in `package.json`, `src-tauri/Ca
 2. The shim needs `core:event:default` + `dialog:default` in `src-tauri/capabilities/default.json` or `__TAURI__.event.listen` and the file dialogs fail with ACL errors (fixed).
 3. Playback CORS: the webview is cross-origin to `127.0.0.1:<port>`; all `/api/*` responses need `Access-Control-Allow-Origin: *` (tower-http CorsLayer, done). Removing it breaks streaming and the X-Riff-Token preflight.
 4. `Cargo.lock` is committed; `cargo clean` costs ~10–15 min full rebuild, so think before cleaning the cache.
-5. The tutorial marker is `%LOCALAPPDATA%\Riff Rust\.rifftutorial` (must contain the app version) — delete it to re-test the first-run wizard.
+5. The tutorial marker is `%LOCALAPPDATA%\Riff Rust\.rifftutorial` — **existence-only** (matching upstream); delete it to re-test the first-run wizard.
 6. `src-tauri/gen/` is build-generated (schemas) — never commit it (gitignored).
 7. Smoke test: launch the release exe, read `%LOCALAPPDATA%\Riff Rust\logs\riff-rust.log` ("serve thread started"…"axum serve starting"), and curl `127.0.0.1:<port>` endpoints. The renderer will `/api/youtube-account-info` at boot (stub = normal).
+8. Axum handlers must be `Send`. Do not hold `&Request<Body>` across an `await` — extract the
+   `Range` header first and pass `Option<&str>` (the request body type is not `Sync`).
+9. Global-shortcut accelerator names must match `global-hotkey`'s parser: `MediaTrackNext`,
+   `MediaTrackPrevious`, not `MediaNextTrack`. Registration failures are logged as `WARN`.
+10. Window geometry must use the monitor **work area**, not `monitor.size()` (which includes the
+    taskbar). `startup_geometry()` calls Win32 `GetMonitorInfoW` and stores logical/DIP bounds in
+    `window-state.json`, same shape as Electron. Removing this makes the window ~40 px too tall.
+11. The onboarding result is pulled by the shim (`take_welcome_result`) when `onWelcomeResult`
+    registers, not emitted on a timer. Tauri's `on_page_load` is builder-only, so a fixed sleep
+    can fire before `app.js` listens on a slow first launch.
+12. `tools.rs` runs `ensureTools` at **every boot** (like upstream): missing binaries download
+    automatically with SHA-256 verification and the renderer closes the required-tools modal when
+    `/api/tools/status` reports both. Do not add a "ffmpeg optional on Windows" shortcut; it forks
+    behaviour away from upstream. If the modal spins forever, check `riff-rust.log` for the install
+    error and `progress.status` from `/api/tools/status` (`downloading|done|error`).
+13. `tauri::generate_context!()` panics with a bare "proc macro panicked" when `web/` (the
+    `frontendDist`) does not exist — e.g. right after `npm run clean:all`. Run `npm run assemble`
+    before `cargo build`/`tauri build`; the error message gives no hint that the frontend is
+    missing.
 
 ## Done (see PORTING.md)
 
-First-run onboarding wizard (upstream-identical), launcher Start-menu shortcut (Windows), local library (import/tags/covers/range streaming), YouTube/SoundCloud search + streaming + downloads via yt-dlp, LRCLIB + custom lyrics, public Spotify playlist import (anonymous embed-token pathfinder), YouTube/SoundCloud playlist import, tray + close-to-tray, cache/data-dir management, settings persistence (`storage.json`).
+First-run onboarding wizard (upstream-identical), launcher Start-menu shortcut (Windows), local library (import/tags/covers/range streaming), YouTube Music search fast path + SoundCloud search, streaming + downloads via yt-dlp, tools auto-install (yt-dlp/ffmpeg with checksum verification and progress, `src-tauri/src/tools.rs`), LRCLIB + custom lyrics, public Spotify playlist import (anonymous embed-token pathfinder), YouTube/SoundCloud playlist import, tray + close-to-tray, cache/data-dir management, settings persistence (`storage.json`), media keys + global shortcuts, mini-player with expandable lyrics, window-visibility events for pausing background work, log rotation, disk cleanup/measure scripts, upstream window startup parity (work-area sizing, saved geometry, hidden until load).
 
 ## Not done (in priority order if continuing parity)
 
@@ -53,10 +83,12 @@ First-run onboarding wizard (upstream-identical), launcher Start-menu shortcut (
 3. Apple Music / Deezer / Yandex / TikTok / VK import
 4. Recommendations/discover (`/api/vibe`, `/api/artist`, trending/hot/charts)
 5. i18n batch translations (Korean UI strings for welcome/app), karaoke word-level lyrics
-6. Auto-updater (no feed), plugin execution sandbox, Discord RPC socket client, mini player, media keys
+6. Auto-updater (no feed), plugin execution sandbox, Discord RPC socket client
 
 ## Honesty rules
 
 - Don't claim parity. "Same UI" is true; "same features" is not yet.
-- Memory claim is unverified — nobody has measured it honestly yet. Do not overstate.
+- Memory/CPU claims need measurements. Use `npm run measure` on the same playback scenario in
+  upstream Riff and Riff Rust before publishing a number; the architecture explains the
+  direction but does not prove a figure.
 - Keep `PORTING.md` current; the owner reads it.

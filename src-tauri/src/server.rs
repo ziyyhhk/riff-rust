@@ -10,14 +10,18 @@ use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
-
+use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::net::TcpListener;
+use tokio_util::io::ReaderStream;
 
 use crate::library;
-use crate::state::AppState;
+use crate::state::{self, AppState};
 use crate::util;
+use crate::ytm;
 
 pub type Shared = Arc<AppState>;
 
@@ -43,31 +47,25 @@ fn unported_list() -> Response {
     json_ok(json!({ "success": false, "error": NOT_PORTED, "tracks": [], "results": [] }))
 }
 
-/// Build an HTTP client honouring the configured proxy.
+/// Shared, pooled HTTP client honouring the configured proxy.
 fn http_client(state: &AppState) -> reqwest::Client {
-    let mut builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) RiffRust/0.1");
-    let proxy = state.proxy_url.lock().map(|p| p.clone()).unwrap_or_default();
-    if !proxy.trim().is_empty() {
-        if let Ok(p) = reqwest::Proxy::all(proxy.trim()) {
-            builder = builder.proxy(p);
-        }
-    }
-    builder.build().unwrap_or_else(|_| reqwest::Client::new())
+    state.http()
 }
 
 /// Spawn a blocking process with a hard timeout; kills it if it overruns.
+/// The old version abandoned the child on timeout, leaving yt-dlp processes
+/// burning CPU/RAM in the background.
 fn run_yt_dlp(state: &AppState, args: &[String], timeout_secs: u64) -> Result<String, String> {
-    let bin = util::resolve_binary("yt-dlp").ok_or_else(|| "yt-dlp not found".to_string());
-    let bin = match bin {
-        Ok(b) => b,
-        Err(e) => return Err(e),
-    };
+    let bin = util::resolve_binary("yt-dlp").ok_or_else(|| "yt-dlp not found".to_string())?;
     let mut full_args: Vec<String> = Vec::new();
     if let Some(ffmpeg) = util::resolve_binary("ffmpeg") {
         full_args.push("--ffmpeg-location".into());
-        full_args.push(ffmpeg.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default());
+        full_args.push(
+            ffmpeg
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default(),
+        );
     }
     full_args.extend(args.iter().cloned());
     if let Ok(proxy) = state.proxy_url.lock() {
@@ -77,31 +75,61 @@ fn run_yt_dlp(state: &AppState, args: &[String], timeout_secs: u64) -> Result<St
         }
     }
 
-    let child = match std::process::Command::new(&bin)
+    let mut child = std::process::Command::new(&bin)
         .args(&full_args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-    {
-        Ok(c) => c,
-        Err(e) => return Err(format!("failed to start yt-dlp: {e}")),
-    };
-
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let out = child.wait_with_output();
-        let _ = tx.send(out);
+        .map_err(|e| format!("failed to start yt-dlp: {e}"))?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "yt-dlp stdout unavailable".to_string())?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "yt-dlp stderr unavailable".to_string())?;
+    let stdout_thread = std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        let _ = stdout.read_to_end(&mut buffer);
+        buffer
     });
-    match rx.recv_timeout(std::time::Duration::from_secs(timeout_secs)) {
-        Ok(Ok(output)) => {
-            if output.status.success() {
-                Ok(String::from_utf8_lossy(&output.stdout).to_string())
-            } else {
-                Err(String::from_utf8_lossy(&output.stderr).to_string())
+    let stderr_thread = std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        let _ = stderr.read_to_end(&mut buffer);
+        buffer
+    });
+
+    let started = Instant::now();
+    let timeout = Duration::from_secs(timeout_secs);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if started.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stdout_thread.join();
+                    let _ = stderr_thread.join();
+                    return Err("yt-dlp timed out".to_string());
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_thread.join();
+                let _ = stderr_thread.join();
+                return Err(format!("yt-dlp wait failed: {e}"));
             }
         }
-        Ok(Err(e)) => Err(format!("yt-dlp I/O error: {e}")),
-        Err(_) => Err("yt-dlp timed out".to_string()),
+    };
+    let out = stdout_thread.join().unwrap_or_default();
+    let err = stderr_thread.join().unwrap_or_default();
+    if status.success() {
+        Ok(String::from_utf8_lossy(&out).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&err).to_string())
     }
 }
 
@@ -114,6 +142,31 @@ async fn search(State(state): State<Shared>, Query(q): Query<HashMap<String, Str
     if query.trim().is_empty() {
         return json_ok(json!({ "success": true, "tracks": [] }));
     }
+
+    // Fast path: direct YouTube Music search. No child process, no Python startup.
+    if !platform.eq_ignore_ascii_case("soundcloud") {
+        let cache_key = format!("ytm:{}:{}", limit, query.trim().to_lowercase());
+        if let Some(cached) =
+            state::cache_get(&state.search_cache, &cache_key, Duration::from_secs(300))
+        {
+            return json_ok(json!({ "success": true, "tracks": cached }));
+        }
+        match ytm::search(&state.http(), query.trim(), limit).await {
+            Ok(tracks) if !tracks.is_empty() => {
+                state::cache_put(
+                    &state.search_cache,
+                    cache_key,
+                    tracks.clone(),
+                    128,
+                    Duration::from_secs(300),
+                );
+                return json_ok(json!({ "success": true, "tracks": tracks }));
+            }
+            Ok(_) => util::log_line("INFO", "ytmusic search returned no tracks; using yt-dlp"),
+            Err(e) => util::log_line("WARN", &format!("{e}; using yt-dlp")),
+        }
+    }
+
     let prefix = if platform.eq_ignore_ascii_case("soundcloud") { "scsearch" } else { "ytsearch" };
     let search_target = format!("{prefix}{limit}:{query}");
     let args = vec![
@@ -123,11 +176,17 @@ async fn search(State(state): State<Shared>, Query(q): Query<HashMap<String, Str
         "--no-playlist".to_string(),
         search_target,
     ];
-    let out = match run_yt_dlp(&state, &args, 25) {
-        Ok(o) => o,
-        Err(e) => {
+    let state_for_task = state.clone();
+    let out = match tokio::task::spawn_blocking(move || run_yt_dlp(&state_for_task, &args, 25)).await
+    {
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => {
             util::log_line("WARN", &format!("search failed: {e}"));
             return json_ok(json!({ "success": false, "tracks": [], "error": e }));
+        }
+        Err(e) => {
+            util::log_line("WARN", &format!("search task failed: {e}"));
+            return json_ok(json!({ "success": false, "tracks": [], "error": "search task failed" }));
         }
     };
     let mut tracks = Vec::new();
@@ -224,6 +283,14 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
     }
 
     let quality = qp(&q, "quality");
+    // Repeated plays of the same track used to spawn yt-dlp every time. Cache the
+    // resolved URL briefly; YouTube signatures/URLs are short-lived, so keep the TTL tight.
+    let cache_key = format!("stream:{quality}:{id}:{target}");
+    if let Some(cached) =
+        state::cache_get(&state.stream_cache, &cache_key, Duration::from_secs(600))
+    {
+        return json_ok(cached);
+    }
     let format_arg = match quality.as_str() {
         "low" | "worst" => "worstaudio",
         "medium" => "bestaudio[abr<=96]/bestaudio",
@@ -238,11 +305,18 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         format_arg.to_string(),
         target.clone(),
     ];
-    let out = match run_yt_dlp(&state, &args, 45) {
-        Ok(o) => o,
-        Err(e) => {
-            util::log_line("WARN", &format!("stream-info failed for {target}: {e}"));
+    let state_for_task = state.clone();
+    let target_for_log = target.clone();
+    let out = match tokio::task::spawn_blocking(move || run_yt_dlp(&state_for_task, &args, 45)).await
+    {
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => {
+            util::log_line("WARN", &format!("stream-info failed for {target_for_log}: {e}"));
             return json_ok(json!({ "success": false, "error": e }));
+        }
+        Err(e) => {
+            util::log_line("WARN", &format!("stream-info task failed for {target_for_log}: {e}"));
+            return json_ok(json!({ "success": false, "error": "stream-info task failed" }));
         }
     };
     let info: Value = match serde_json::from_str(&out) {
@@ -278,7 +352,7 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         .or_else(|| item_thumbnail(&info))
         .unwrap_or_default();
     let mime = info.get("ext").and_then(|v| v.as_str()).map(util::mime_from_ext).unwrap_or("audio/mp4");
-    json_ok(json!({
+    let payload = json!({
         "success": true,
         "streamUrl": stream_url,
         "mimeType": mime,
@@ -288,7 +362,15 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         "artist": info.get("uploader").and_then(|v| v.as_str()).unwrap_or(&artist),
         "thumbnail": thumbnail,
         "direct": true,
-    }))
+    });
+    state::cache_put(
+        &state.stream_cache,
+        cache_key,
+        payload.clone(),
+        256,
+        Duration::from_secs(600),
+    );
+    json_ok(payload)
 }
 
 fn item_thumbnail(item: &Value) -> Option<String> {
@@ -300,68 +382,121 @@ fn item_thumbnail(item: &Value) -> Option<String> {
 
 // ---------------------------------------------------- local file streaming
 
-fn serve_file_with_range(path: &PathBuf, req: &Request<Body>) -> Response {
-    let data = match fs::read(path) {
-        Ok(d) => d,
+fn parse_range_header(raw: Option<&str>, total: u64) -> Result<Option<(u64, u64)>, ()> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let Some(spec) = raw.strip_prefix("bytes=") else {
+        return Err(());
+    };
+    // Multi-range requests are legal but browsers only need the first range for audio.
+    let spec = spec.split(',').next().unwrap_or("").trim();
+    let (start_text, end_text) = spec.split_once('-').ok_or(())?;
+    if total == 0 {
+        return Err(());
+    }
+    if start_text.is_empty() {
+        // suffix range: last N bytes
+        let suffix: u64 = end_text.parse().map_err(|_| ())?;
+        if suffix == 0 {
+            return Err(());
+        }
+        let length = suffix.min(total);
+        Ok(Some((total - length, total - 1)))
+    } else {
+        let start: u64 = start_text.parse().map_err(|_| ())?;
+        if start >= total {
+            return Err(());
+        }
+        let end = if end_text.is_empty() {
+            total - 1
+        } else {
+            end_text.parse::<u64>().map_err(|_| ())?.min(total - 1)
+        };
+        if end < start {
+            return Err(());
+        }
+        Ok(Some((start, end)))
+    }
+}
+
+fn range_not_satisfiable(total: u64) -> Response {
+    Response::builder()
+        .status(StatusCode::RANGE_NOT_SATISFIABLE)
+        .header(axum::http::header::CONTENT_RANGE, format!("bytes */{total}"))
+        .header(axum::http::header::ACCEPT_RANGES, "bytes")
+        .body(Body::empty())
+        .unwrap_or_else(|_| Response::new(Body::empty()))
+}
+
+/// Stream the requested byte range straight from disk. The previous implementation
+/// read the entire track into a Vec for every request, so a 60 MB FLAC cost 60 MB of
+/// RAM (plus a second copy while slicing) on each seek.
+async fn serve_file_with_range(path: &PathBuf, range_header: Option<&str>) -> Response {
+    let mut file = match tokio::fs::File::open(path).await {
+        Ok(file) => file,
         Err(_) => return json_err(StatusCode::NOT_FOUND, "file not found"),
     };
-    let total = data.len() as u64;
-    let ext = path.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_else(|| "mp3".into());
-    let mime = util::mime_from_ext(&ext);
-
-    let mut start: u64 = 0;
-    let mut end: u64 = total.saturating_sub(1);
-    let mut is_range = false;
-    if let Some(range) = req.headers().get(axum::http::header::RANGE).and_then(|v| v.to_str().ok()) {
-        if let Some(spec) = range.strip_prefix("bytes=") {
-            let mut parts = spec.splitn(2, '-');
-            let a = parts.next().unwrap_or("").trim();
-            let b = parts.next().unwrap_or("").trim();
-            if a.is_empty() {
-                // suffix range: last N bytes
-                if let Ok(suffix) = b.parse::<u64>() {
-                    start = total.saturating_sub(suffix.min(total));
-                    end = total.saturating_sub(1);
-                    is_range = true;
-                }
-            } else {
-                start = a.parse::<u64>().unwrap_or(0);
-                if !b.is_empty() {
-                    end = b.parse::<u64>().unwrap_or(total.saturating_sub(1));
-                } else {
-                    end = total.saturating_sub(1);
-                }
-                end = end.min(total.saturating_sub(1));
-                is_range = true;
-            }
-        }
+    let total = match file.metadata().await {
+        Ok(meta) => meta.len(),
+        Err(_) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, "could not stat file"),
+    };
+    let parsed = match parse_range_header(range_header, total) {
+        Ok(parsed) => parsed,
+        Err(_) => return range_not_satisfiable(total),
+    };
+    let (start, end, is_range) = match parsed {
+        Some((start, end)) => (start, end, true),
+        None => (0, total.saturating_sub(1), false),
+    };
+    let length = if total == 0 {
+        0
+    } else {
+        end.saturating_sub(start) + 1
+    };
+    if start > 0 && file.seek(SeekFrom::Start(start)).await.is_err() {
+        return json_err(StatusCode::INTERNAL_SERVER_ERROR, "could not seek file");
     }
 
-    let slice = data[start as usize..(end as usize + 1)].to_vec();
-    let mut response = Response::builder()
-        .status(if is_range { StatusCode::PARTIAL_CONTENT } else { StatusCode::OK })
-        .header(axum::http::header::CONTENT_TYPE, mime)
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_else(|| "mp3".into());
+    let stream = ReaderStream::with_capacity(file.take(length), 64 * 1024);
+    let mut builder = Response::builder()
+        .status(if is_range {
+            StatusCode::PARTIAL_CONTENT
+        } else {
+            StatusCode::OK
+        })
+        .header(axum::http::header::CONTENT_TYPE, util::mime_from_ext(&ext))
         .header(axum::http::header::ACCEPT_RANGES, "bytes")
-        .header(axum::http::header::CONTENT_LENGTH, slice.len().to_string());
+        .header(axum::http::header::CONTENT_LENGTH, length.to_string());
     if is_range {
-        response = response.header(
+        builder = builder.header(
             axum::http::header::CONTENT_RANGE,
             format!("bytes {start}-{end}/{total}"),
         );
     }
-    response.body(Body::from(slice)).unwrap_or_else(|_| Response::new(Body::empty()))
+    builder
+        .body(Body::from_stream(stream))
+        .unwrap_or_else(|_| Response::new(Body::empty()))
 }
 
-async fn local_track(State(_state): State<Shared>, Query(q): Query<HashMap<String, String>>, req: Request<Body>) -> Response {
+async fn local_track(Query(q): Query<HashMap<String, String>>, req: Request<Body>) -> Response {
+    let range_header = req
+        .headers()
+        .get(axum::http::header::RANGE)
+        .and_then(|value| value.to_str().ok());
     let id = qp(&q, "id");
     match library::find_track_by_id(&id) {
-        Some(path) => serve_file_with_range(&path, &req),
+        Some(path) => serve_file_with_range(&path, range_header).await,
         None => json_err(StatusCode::NOT_FOUND, "track not found"),
     }
 }
 
-async fn library_file(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>, req: Request<Body>) -> Response {
-    local_track(State(state), Query(q), req).await
+async fn library_file(Query(q): Query<HashMap<String, String>>, req: Request<Body>) -> Response {
+    local_track(Query(q), req).await
 }
 
 async fn local_thumbnail(State(_state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
@@ -483,12 +618,13 @@ async fn offline_delete(State(_state): State<Shared>, Query(q): Query<HashMap<St
     if id.is_empty() {
         return json_err(StatusCode::BAD_REQUEST, "missing id");
     }
-    // downloaded cache file
+    // downloaded cache file (match the exact id or `<id>.<ext>`, never a shared prefix)
     let mut removed = false;
+    let exact_prefix = format!("{id}.");
     if let Ok(entries) = fs::read_dir(util::cache_dir()) {
         for entry in entries.flatten() {
-            let stem = entry.file_name().to_string_lossy().to_string();
-            if stem.starts_with(&id) {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name == id || name.starts_with(&exact_prefix) {
                 let _ = fs::remove_file(entry.path());
                 removed = true;
             }
@@ -610,49 +746,44 @@ async fn download(State(state): State<Shared>, Query(q): Query<HashMap<String, S
 
 // ------------------------------------------------------------------- tools
 
-async fn tools_status(State(_state): State<Shared>) -> Response {
+async fn tools_status(State(state): State<Shared>) -> Response {
     let ytdlp = util::resolve_binary("yt-dlp");
     let ffmpeg = util::resolve_binary("ffmpeg");
+    #[cfg(target_os = "macos")]
+    let ffmpeg_optional = true;
+    #[cfg(not(target_os = "macos"))]
+    let ffmpeg_optional = false;
+
+    let progress = state.tool_install().clone();
+    let step = if progress.status == "downloading" {
+        format!("downloading {}", progress.tool)
+    } else {
+        String::new()
+    };
     json_ok(json!({
         "success": true,
         "ytdlp": ytdlp.as_ref().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
         "ytDlp": ytdlp.is_some(),
         "ffmpeg": ffmpeg.as_ref().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
-        "ffmpegOptional": false,
-        "percent": 100,
-        "step": "",
+        "ffmpegOptional": ffmpeg_optional,
+        "percent": if progress.status == "downloading" { progress.percent } else { 100 },
+        "step": step,
+        "error": progress.error,
+        "ffmpegError": progress.ffmpeg_error,
+        "progress": {
+            "status": progress.status,
+            "tool": progress.tool,
+            "percent": progress.percent,
+            "error": progress.error,
+        },
     }))
 }
 
-async fn tools_install(State(_state): State<Shared>) -> Response {
-    let bin_dir = util::bin_dir();
-    let _ = fs::create_dir_all(&bin_dir);
-    let target = bin_dir.join(if cfg!(target_os = "windows") { "yt-dlp.exe" } else { "yt-dlp" });
-    if target.is_file() {
-        return json_ok(json!({ "success": true, "already": true, "path": target.to_string_lossy() }));
-    }
-    // Background download of the yt-dlp standalone binary (~15 MB). ffmpeg must be
-    // installed separately (winget/choco/scoop or your package manager).
-    std::thread::spawn(move || {
-        let url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
-        let url = if cfg!(target_os = "windows") { format!("{url}.exe") } else { url.to_string() };
-        match reqwest::blocking::get(&url) {
-            Ok(resp) => match resp.bytes() {
-                Ok(bytes) => {
-                    let _ = fs::write(&target, &bytes);
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        let _ = fs::set_permissions(&target, fs::Permissions::from_mode(0o755));
-                    }
-                    util::log_line("INFO", &format!("yt-dlp installed to {}", target.display()));
-                }
-                Err(e) => util::log_line("ERROR", &format!("yt-dlp download failed: {e}")),
-            },
-            Err(e) => util::log_line("ERROR", &format!("yt-dlp download failed: {e}")),
-        }
-    });
-    json_ok(json!({ "success": true, "started": true, "note": "yt-dlp downloading in background; ffmpeg must be installed via winget/choco/scoop" }))
+/// Kick off the same background `ensureTools` upstream runs at boot. Idempotent:
+/// a run already in progress is left alone.
+async fn tools_install(State(state): State<Shared>) -> Response {
+    crate::tools::ensure_tools(state.clone());
+    json_ok(json!({ "success": true, "started": true }))
 }
 
 // ------------------------------------------------------------- connectivity
@@ -1275,9 +1406,12 @@ async fn playlist_import(State(state): State<Shared>, Query(q): Query<HashMap<St
         "--no-warnings".to_string(),
         url.clone(),
     ];
-    let out = match run_yt_dlp(&state, &args, 90) {
-        Ok(o) => o,
-        Err(e) => return json_ok(json!({ "success": false, "error": e })),
+    let state_for_task = state.clone();
+    let out = match tokio::task::spawn_blocking(move || run_yt_dlp(&state_for_task, &args, 90)).await
+    {
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => return json_ok(json!({ "success": false, "error": e })),
+        Err(e) => return json_ok(json!({ "success": false, "error": format!("playlist task failed: {e}") })),
     };
     let info: Value = match serde_json::from_str(&out) {
         Ok(v) => v,
@@ -1484,4 +1618,45 @@ pub fn serve(listener: std::net::TcpListener, state: Shared) {
             }
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_range_header;
+
+    #[test]
+    fn parses_open_ended_range() {
+        assert_eq!(parse_range_header(Some("bytes=0-"), 1000), Ok(Some((0, 999))));
+        assert_eq!(
+            parse_range_header(Some("bytes=500-"), 1000),
+            Ok(Some((500, 999)))
+        );
+    }
+
+    #[test]
+    fn parses_bounded_and_suffix_ranges() {
+        assert_eq!(
+            parse_range_header(Some("bytes=100-199"), 1000),
+            Ok(Some((100, 199)))
+        );
+        assert_eq!(
+            parse_range_header(Some("bytes=-100"), 1000),
+            Ok(Some((900, 999)))
+        );
+        // End beyond EOF is clamped, as the HTTP spec requires.
+        assert_eq!(
+            parse_range_header(Some("bytes=900-5000"), 1000),
+            Ok(Some((900, 999)))
+        );
+    }
+
+    #[test]
+    fn rejects_unsatisfiable_ranges() {
+        assert_eq!(parse_range_header(Some("bytes=1000-"), 1000), Err(()));
+        assert_eq!(parse_range_header(Some("bytes=500-100"), 1000), Err(()));
+        assert_eq!(parse_range_header(Some("bytes=-0"), 1000), Err(()));
+        assert_eq!(parse_range_header(Some("items=0-10"), 1000), Err(()));
+        assert_eq!(parse_range_header(Some("bytes=0-"), 0), Err(()));
+        assert_eq!(parse_range_header(None, 0), Ok(None));
+    }
 }
