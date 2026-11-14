@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for the main window: plugin commands used by the UI shim",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:event:default",
+    "dialog:default"
+  ]
+}
