@@ -754,13 +754,16 @@ pub fn read_cache_file() -> String {
     fs::read_to_string(util::data_dir().join("web-cache.json")).unwrap_or_default()
 }
 
+/// `data` is the renderer's HomeCache object; upstream sends it raw. Serialize
+/// on our side and accept any JSON — the old `String` signature rejected every
+/// call ("invalid type: map, expected a string").
 #[tauri::command]
-pub fn write_cache_file(data: String) -> bool {
+pub fn write_cache_file(data: serde_json::Value) -> bool {
     let path = util::data_dir().join("web-cache.json");
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    fs::write(path, data).is_ok()
+    fs::write(path, serde_json::to_string(&data).unwrap_or_else(|_| "{}".to_string())).is_ok()
 }
 
 #[tauri::command]

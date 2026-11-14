@@ -390,9 +390,9 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         return json_ok(cached);
     }
     let format_arg = match quality.as_str() {
-        "low" | "worst" => "worstaudio",
-        "medium" => "bestaudio[abr<=96]/bestaudio",
-        _ => "bestaudio",
+        "low" | "worst" => "worstaudio[ext=m4a]/worstaudio",
+        "medium" => "bestaudio[abr<=96][ext=m4a]/bestaudio[ext=m4a]/bestaudio[abr<=96]/bestaudio",
+        _ => "bestaudio[ext=m4a]/bestaudio[ext=mp4]/bestaudio",
     };
 
     let args = vec![
@@ -453,7 +453,7 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         .map(|s| s.to_string())
         .or_else(|| item_thumbnail(&info))
         .unwrap_or_default();
-    let ext = info.get("ext").and_then(|v| v.as_str()).unwrap_or("webm").to_string();
+    let ext = info.get("ext").and_then(|v| v.as_str()).unwrap_or("m4a").to_string();
     let mime = util::mime_from_ext(&ext);
     // Match upstream's shape: the renderer picks `proxyUrl || streamUrl` for
     // non-local tracks. The raw CDN URL breaks the Web Audio pipeline because
@@ -1165,15 +1165,35 @@ async fn audio_proxy(State(state): State<Shared>, Query(q): Query<HashMap<String
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("audio/mp4")
                 .to_string();
+            // Forward length/range metadata — WebView2's media pipeline needs
+            // them to demux MP4 progressively; without Content-Range the
+            // element reports MEDIA_ERR_SRC_NOT_SUPPORTED ("Format error").
+            let content_length = resp.content_length();
+            let content_range = resp
+                .headers()
+                .get(reqwest::header::CONTENT_RANGE)
+                .and_then(|v| v.to_str().ok().map(str::to_string));
+            let accept_ranges = resp
+                .headers()
+                .get(reqwest::header::ACCEPT_RANGES)
+                .and_then(|v| v.to_str().ok().map(str::to_string));
             let stream = resp.bytes_stream().map(|chunk| {
                 chunk.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })
             });
-            Response::builder()
+            let mut builder = Response::builder()
                 .status(status)
                 .header(axum::http::header::CONTENT_TYPE, content_type)
-                .header(axum::http::header::ACCEPT_RANGES, "bytes")
-                .body(Body::from_stream(stream))
-                .unwrap()
+                .header(
+                    axum::http::header::ACCEPT_RANGES,
+                    accept_ranges.unwrap_or_else(|| "bytes".into()),
+                );
+            if let Some(content_length) = content_length {
+                builder = builder.header(axum::http::header::CONTENT_LENGTH, content_length);
+            }
+            if let Some(content_range) = content_range {
+                builder = builder.header(axum::http::header::CONTENT_RANGE, content_range);
+            }
+            builder.body(Body::from_stream(stream)).unwrap()
         }
         Err(_) => json_err(StatusCode::BAD_GATEWAY, "stream fetch failed"),
     }
