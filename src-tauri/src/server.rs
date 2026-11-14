@@ -301,6 +301,10 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         "-j".to_string(),
         "--no-warnings".to_string(),
         "--no-playlist".to_string(),
+        "--socket-timeout".to_string(),
+        "8".to_string(),
+        "--retries".to_string(),
+        "1".to_string(),
         "--format".to_string(),
         format_arg.to_string(),
         target.clone(),
@@ -742,6 +746,36 @@ async fn download(State(state): State<Shared>, Query(q): Query<HashMap<String, S
         Ok(Err(e)) => json_ok(json!({ "success": false, "error": e })),
         Err(e) => json_ok(json!({ "success": false, "error": format!("download task failed: {e}") })),
     }
+}
+
+// --------------------------------------------------------------- discovery
+
+async fn vibe(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(7),
+        crate::discovery::vibe(&state, &body),
+    )
+    .await
+    {
+        Ok(payload) => json_ok(payload),
+        Err(_) => json_ok(json!({ "success": false, "tracks": [], "error": "timeout" })),
+    }
+}
+
+async fn hot(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
+    json_ok(crate::discovery::hot(&state, &q).await)
+}
+
+async fn trending(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
+    json_ok(crate::discovery::trending(&state, &q).await)
+}
+
+async fn top_chart(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
+    json_ok(crate::discovery::top_chart(&state, &q).await)
+}
+
+async fn artist(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
+    json_ok(crate::discovery::artist(&state, &q).await)
 }
 
 // ------------------------------------------------------------------- tools
@@ -1531,12 +1565,12 @@ pub fn build_router(state: Shared) -> Router {
         .route("/api/save-track-source", post(save_track_source))
         .route("/api/state", post(api_state))
         .route("/api/brand-icon", get(brand_icon))
-        .route("/api/trending", get(stub_empty_list))
-        .route("/api/hot", get(stub_empty_list))
-        .route("/api/top-chart", get(stub_empty_list))
-        .route("/api/vibe", post(stub_empty_list))
+        .route("/api/trending", get(trending))
+        .route("/api/hot", get(hot))
+        .route("/api/top-chart", get(top_chart))
+        .route("/api/vibe", post(vibe))
         .route("/api/track-analysis", get(stub_unported))
-        .route("/api/artist", get(stub_empty_list))
+        .route("/api/artist", get(artist))
         .route("/api/prefetch", get(stub_unported))
         .route("/api/albums/search", get(stub_empty_list))
         .route("/api/playlists/search", get(stub_empty_list))

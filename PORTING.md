@@ -63,6 +63,12 @@ The Electron main process and Node server were replaced with Rust.
 - ✅ Window visibility events (`window-visibility`) on minimize/restore/hide/show, so the renderer
   can pause visualizers/background video while hidden.
 - ✅ Shared pooled HTTP client (connection reuse, gzip) and bounded TTL caches for search/stream URLs
+- ✅ Discovery/recommendations (`src-tauri/src/discovery.rs`): country charts (`/api/top-chart`,
+  YouTube Charts playlist browse via YTM inner API + iTunes RSS + Last.fm fallback), `/api/vibe`
+  (seeded by YTM RDAMVM mixes + Deezer related artists, 20-minute cache), `/api/trending`
+  (Deezer scene charts + YTM search, 30-minute cache), `/api/hot` (global Deezer chart resolved
+  through YTM), `/api/artist` (Deezer top tracks/albums/fans + Last.fm bio & monthly listeners).
+  The home page now fills like upstream: For You / Trending / Top chart.
 - 🟡 Discord Rich Presence: toggle plumbing exists, RPC itself not wired (needs a Discord socket client)
 - 🟡 Plugin execution: listable/toggleable, but sandboxed runner not built
 - 🟡 Proxy config: stored and applied to yt-dlp + server-side fetches; no per-route test UI wiring
@@ -72,8 +78,7 @@ The Electron main process and Node server were replaced with Rust.
 - Google / YouTube account sign-in & library import (OAuth PKCE flow, account encryption)
 - Spotify integration (auth, personal library) — but **public playlist import works**
 - Apple Music, Deezer, Yandex, TikTok, VK playlist import
-- Last.fm (scrobbling, token flow)
-- Discovery/recommendations (`/api/vibe`, `/api/artist`, `/api/trending`, `/api/hot`, `/api/top-chart`)
+- Last.fm (scrobbling, token flow; only used anonymously for artist bio/listeners)
 - i18n/translation batch API, karaoke word-level lyrics (`/api/lyrics-words`)
 - Audio editor/trim/region-embed pipeline (editor UI loads, but backend trim export is unported)
 - Auto-updater (no release feed configured for Riff Rust yet)
@@ -92,8 +97,13 @@ Backend-specific wins over the first Rust build (v0.1.1):
 - Local playback streams ranges from disk instead of reading a whole track into memory per
   request (a 60 MB FLAC no longer costs 60 MB RAM on every seek).
 - One pooled `reqwest::Client` instead of a new client/TLS handshake per request.
-- Search no longer spawns yt-dlp/Python in the common case; resolved stream URLs are cached
-  for 10 minutes.
+- Search runs through the Rust YTM inner API by default (~300–1500 ms, bound by YouTube's
+  servers) instead of spawning `yt-dlp`/Python per query; resolved stream URLs are cached for
+  10 minutes.
+- Embedded API client timeout is 8 s (connect 6 s): a stalling YouTube degrades in seconds
+  instead of hanging for 30.
+- yt-dlp resolution uses `--socket-timeout 8 --retries 1`: bad networks fail fast; the
+  localhost audio proxy remains a true streaming proxy (bytes forwarded, nothing buffered).
 - yt-dlp children are killed on timeout instead of being left running.
 - Logs rotate at 4 MB; `cacheLimitMB` in `config.json` optionally trims `tracks/` at startup.
 - Minimized windows now tell the renderer, letting it stop visualizer/background work.

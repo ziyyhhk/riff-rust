@@ -197,7 +197,7 @@ fn valid_video_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-fn parse_duration(text: &str) -> u64 {
+pub fn parse_duration(text: &str) -> u64 {
     let parts: Vec<&str> = text.trim().split(':').collect();
     if parts.len() < 2 || parts.len() > 3 {
         return 0;

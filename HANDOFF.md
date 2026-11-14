@@ -71,19 +71,26 @@ Release process used for v0.1.x: bump `version` in `package.json`, `src-tauri/Ca
     `frontendDist`) does not exist — e.g. right after `npm run clean:all`. Run `npm run assemble`
     before `cargo build`/`tauri build`; the error message gives no hint that the frontend is
     missing.
+14. YTM's `FEmusic_charts` page contains **no track rows** — only `musicTwoRowItemRenderer`
+    "chart cards" (`subtitle` contains "Chart • YouTube Charts"). `/api/top-chart` parses the
+    cards, picks the best playlist (Top 100 > Trending > Top 50), and browses that playlist
+    (`musicResponsiveListItemRenderer` rows, with the artist in flex column 1). Parsing rows
+    directly from the charts page yields zero tracks.
+15. `npm install`-time version bumps must not be done with blanket `x.y.z` string replace —
+    it corrupted `Cargo.lock` (`hyper-util`/`windows-sys` patch versions). Bump only the root
+    package versions, then let cargo sync the lockfile.
 
 ## Done (see PORTING.md)
 
-First-run onboarding wizard (upstream-identical), launcher Start-menu shortcut (Windows), local library (import/tags/covers/range streaming), YouTube Music search fast path + SoundCloud search, streaming + downloads via yt-dlp, tools auto-install (yt-dlp/ffmpeg with checksum verification and progress, `src-tauri/src/tools.rs`), LRCLIB + custom lyrics, public Spotify playlist import (anonymous embed-token pathfinder), YouTube/SoundCloud playlist import, tray + close-to-tray, cache/data-dir management, settings persistence (`storage.json`), media keys + global shortcuts, mini-player with expandable lyrics, window-visibility events for pausing background work, log rotation, disk cleanup/measure scripts, upstream window startup parity (work-area sizing, saved geometry, hidden until load).
+First-run onboarding wizard (upstream-identical), launcher Start-menu shortcut (Windows), local library (import/tags/covers/range streaming), YouTube Music search fast path + SoundCloud search, streaming + downloads via yt-dlp, tools auto-install (yt-dlp/ffmpeg with checksum verification and progress, `src-tauri/src/tools.rs`), LRCLIB + custom lyrics, public Spotify playlist import (anonymous embed-token pathfinder), YouTube/SoundCloud playlist import, tray + close-to-tray, cache/data-dir management, settings persistence (`storage.json`), media keys + global shortcuts, mini-player with expandable lyrics, window-visibility events for pausing background work, log rotation, disk cleanup/measure scripts, upstream window startup parity (work-area sizing, saved geometry, hidden until load), discovery (`src-tauri/src/discovery.rs`: vibe/top-chart/trending/hot/artist — home page sections now populate).
 
 ## Not done (in priority order if continuing parity)
 
 1. Google/YouTube sign-in & import (OAuth PKCE + account file) — upstream: `google-oauth.js`, `youtube-data.js`
 2. Spotify account integration (auth, library) — import works, account features don't
 3. Apple Music / Deezer / Yandex / TikTok / VK import
-4. Recommendations/discover (`/api/vibe`, `/api/artist`, trending/hot/charts)
-5. i18n batch translations (Korean UI strings for welcome/app), karaoke word-level lyrics
-6. Auto-updater (no feed), plugin execution sandbox, Discord RPC socket client
+4. i18n batch translations (Korean UI strings for welcome/app), karaoke word-level lyrics
+5. Auto-updater (no feed), plugin execution sandbox, Discord RPC socket client
 
 ## Honesty rules
 
@@ -92,3 +99,4 @@ First-run onboarding wizard (upstream-identical), launcher Start-menu shortcut (
   upstream Riff and Riff Rust before publishing a number; the architecture explains the
   direction but does not prove a figure.
 - Keep `PORTING.md` current; the owner reads it.
+

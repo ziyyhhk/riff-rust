@@ -121,8 +121,8 @@ impl AppState {
             }
         }
         let mut builder = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30))
+            .connect_timeout(Duration::from_secs(6))
+            .timeout(Duration::from_secs(8))
             .pool_max_idle_per_host(16)
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) RiffRust/0.1")
             .gzip(true);
