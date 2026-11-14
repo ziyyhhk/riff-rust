@@ -568,9 +568,10 @@ fn do_install_launcher() -> bool {
         exe.display(),
         exe.display()
     );
-    std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command", &script])
-        .output()
+    let mut cmd = std::process::Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command", &script]);
+    crate::util::hide_console(&mut cmd);
+    cmd.output()
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
@@ -698,7 +699,10 @@ pub fn open_external(u: String) {
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("cmd").args(["/C", "start", "", &u]).spawn();
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "start", "", &u]);
+        crate::util::hide_console(&mut cmd);
+        let _ = cmd.spawn();
     }
     #[cfg(target_os = "macos")]
     {

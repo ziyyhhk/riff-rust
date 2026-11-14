@@ -75,10 +75,12 @@ fn run_yt_dlp(state: &AppState, args: &[String], timeout_secs: u64) -> Result<St
         }
     }
 
-    let mut child = std::process::Command::new(&bin)
-        .args(&full_args)
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.args(&full_args)
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    util::hide_console(&mut cmd);
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("failed to start yt-dlp: {e}"))?;
     let mut stdout = child

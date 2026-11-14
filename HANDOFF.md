@@ -79,6 +79,9 @@ Release process used for v0.1.x: bump `version` in `package.json`, `src-tauri/Ca
 15. `npm install`-time version bumps must not be done with blanket `x.y.z` string replace —
     it corrupted `Cargo.lock` (`hyper-util`/`windows-sys` patch versions). Bump only the root
     package versions, then let cargo sync the lockfile.
+16. Any `Command::new` on Windows must use `CREATE_NO_WINDOW` (`util::hide_console`) or the
+    GUI app's console children flash black cmd windows (user-visible bug, fixed in v0.1.4).
+    Audit new spawns — Explorer/`open`/`xdg-open` are the exceptions (they ARE the UI).
 
 ## Done (see PORTING.md)
 

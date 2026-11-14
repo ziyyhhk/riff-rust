@@ -246,6 +246,17 @@ fn rotate_log_file(path: &PathBuf) {
 }
 
 /// Write to the app log (best effort), rotating at 4 MB and keeping three old files.
+/// Hide the console window of a child process on Windows (CREATE_NO_WINDOW).
+/// Console binaries spawned from the GUI app otherwise allocate a visible
+/// console; `stdout`/`stderr` capture alone is not enough.
+pub fn hide_console(cmd: &mut std::process::Command) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+}
+
 pub fn log_line(level: &str, message: &str) {
     let _guard = LOG_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let dir = logs_dir();
