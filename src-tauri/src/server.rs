@@ -374,6 +374,107 @@ fn download_to_file(url: &str, target: &std::path::Path) -> bool {
     false
 }
 
+/// Signed googlevideo URLs throttle a whole-file GET to a crawl (we observed
+/// 30–60 KB/s and multi-minute hangs) but serve 1 MB ranges at full speed
+/// (measured ~3 MB/s), so pull the file in Range chunks. Returns false on any
+/// failure so the caller can fall back to yt-dlp.
+fn ranged_download_to_file(url: &str, target: &std::path::Path) -> bool {
+    use std::io::Write;
+
+    const CHUNK: u64 = 1024 * 1024;
+
+    let client = match reqwest::blocking::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+    {
+        Ok(client) => client,
+        Err(e) => {
+            util::log_line("WARN", &format!("ranged download client: {e}"));
+            return false;
+        }
+    };
+
+    let mut file = match fs::File::create(target) {
+        Ok(file) => file,
+        Err(e) => {
+            util::log_line("WARN", &format!("ranged download create {target:?}: {e}"));
+            return false;
+        }
+    };
+
+    let mut offset: u64 = 0;
+    let mut total: Option<u64> = None;
+    loop {
+        let end = offset.saturating_add(CHUNK).saturating_sub(1);
+        let response = match client
+            .get(url)
+            .header(reqwest::header::RANGE, format!("bytes={offset}-{end}"))
+            .send()
+        {
+            Ok(response) => response,
+            Err(e) => {
+                util::log_line("WARN", &format!("ranged download chunk at {offset}: {e}"));
+                let _ = fs::remove_file(target);
+                return false;
+            }
+        };
+        let status = response.status();
+        if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+            break;
+        }
+        if status == reqwest::StatusCode::PARTIAL_CONTENT {
+            if total.is_none() {
+                total = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_RANGE)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.split('/').nth(1))
+                    .and_then(|value| value.trim().parse::<u64>().ok());
+            }
+            let body = match response.bytes() {
+                Ok(body) => body,
+                Err(e) => {
+                    util::log_line("WARN", &format!("ranged download read at {offset}: {e}"));
+                    let _ = fs::remove_file(target);
+                    return false;
+                }
+            };
+            if file.write_all(&body).is_err() {
+                let _ = fs::remove_file(target);
+                return false;
+            }
+            offset += body.len() as u64;
+            if let Some(total) = total {
+                if offset >= total {
+                    break;
+                }
+            }
+            continue;
+        }
+        if status.is_success() {
+            // Range ignored: copy the whole body we already have.
+            match response.bytes() {
+                Ok(body) => {
+                    let _ = file.write_all(&body);
+                }
+                Err(e) => {
+                    util::log_line("WARN", &format!("ranged download fallback read: {e}"));
+                    let _ = fs::remove_file(target);
+                    return false;
+                }
+            }
+            break;
+        }
+        util::log_line("WARN", &format!("ranged download status {status}"));
+        let _ = fs::remove_file(target);
+        return false;
+    }
+    drop(file);
+    true
+}
+
 /// Download `target` (a watch/perma URL) with yt-dlp and hand back the resulting
 /// file. Slower than reqwest (yt-dlp resolves the page itself, ~8-15 s here) but
 /// it works where the signed googlevideo URL handed to us by the inner API only
@@ -559,10 +660,42 @@ fn ensure_mp3_cached(resolved_id: &str, page_target: &str, stream_url: &str) -> 
         ),
     );
 
-    // 1. YouTube: let yt-dlp resolve AND download in one process. The direct
-    // HTTP path gets throttled to ~30-60 KB/s on some networks and hangs for
-    // minutes; yt-dlp asks YouTube for a fresh URL and pulls full speed.
+    // 1. YouTube: pull the direct VISIONOS URL in Range chunks (~1–2 s for a
+    // ~3 MB track) and transcode. Whole-file GETs get throttled, so the old
+    // single-shot path starved; yt-dlp is the last resort.
     if page_target.contains("youtube.com") || page_target.contains("youtu.be") {
+        if !stream_url.is_empty() && !stream_url.contains(".m3u8") {
+            let src = unique_tmp(resolved_id, "ranged.m4a");
+            if ranged_download_to_file(stream_url, &src) {
+                if let Some(ffmpeg) = util::resolve_binary("ffmpeg") {
+                    let tmp = unique_tmp(resolved_id, "mp3.part");
+                    let ok = ffmpeg_transcode_to_mp3(&ffmpeg, &src.to_string_lossy(), &tmp);
+                    let _ = fs::remove_file(&src);
+                    if ok && write_cache_file(&tmp, &target) {
+                        util::log_line(
+                            "INFO",
+                            &format!(
+                                "cached stream {resolved_id} -> {} ({} ms)",
+                                target.display(),
+                                started.elapsed().as_millis()
+                            ),
+                        );
+                        return Some(target);
+                    }
+                    let _ = fs::remove_file(&tmp);
+                    util::log_line("WARN", &format!("background mp3 cache: transcode failed for {resolved_id}"));
+                } else {
+                    let _ = fs::remove_file(&src);
+                    util::log_line("WARN", "ffmpeg missing; cannot transcode to mp3");
+                }
+            } else {
+                let _ = fs::remove_file(&src);
+                util::log_line(
+                    "WARN",
+                    &format!("ranged download failed for {resolved_id}; falling back to yt-dlp"),
+                );
+            }
+        }
         let page = if !page_target.is_empty() {
             page_target.to_string()
         } else if resolved_id.len() == 11 {
@@ -1178,6 +1311,35 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         };
         if let Some(direct_url) = direct_url {
             let resolved_id = id.clone();
+            // WebView2 on this machine can't decode AAC/m4a (code=4), so handing
+            // it the raw proxy URL just forces a 15–60 s decode-failure recovery.
+            // Transcode to a guaranteed MP3 synchronously instead (ranged
+            // download ~1–2 s + ffmpeg); fall back to the proxy URL if that fails.
+            let tid = resolved_id.clone();
+            let page = target.clone();
+            let url = direct_url.clone();
+            let mp3 = tokio::task::spawn_blocking(move || {
+                ensure_mp3_cached(&tid, &page, &url)
+            })
+            .await;
+            if let Ok(Some(_)) = mp3 {
+                let port = state.server_port;
+                let payload = json!({
+                    "success": true,
+                    "isLocal": true,
+                    "isHls": false,
+                    "mimeType": "audio/mpeg",
+                    "streamUrl": format!("http://127.0.0.1:{port}/api/local-track?id={resolved_id}"),
+                    "resolvedId": resolved_id,
+                    "duration": duration_q.parse::<u64>().unwrap_or(0),
+                    "title": title,
+                    "artist": artist,
+                    "thumbnail": "",
+                    "direct": true,
+                });
+                state::cache_put(&state.stream_cache, cache_key, payload.clone(), 256, Duration::from_secs(600));
+                return json_ok(payload);
+            }
         let port = state.server_port;
         let proxied = format!(
             "http://127.0.0.1:{port}/api/audio-proxy?url={}",
@@ -1386,10 +1548,19 @@ async fn prefetch_track(State(state): State<Shared>, Query(q): Query<HashMap<Str
     } else {
         format!("https://www.youtube.com/watch?v={id}")
     };
+    // Resolve the fresh VISIONOS URL now so the background worker can use the
+    // fast Range-chunk download instead of yt-dlp (~10–60 s).
+    let mut direct = String::new();
+    if !page.contains("soundcloud.com") && is_video_id(&id) {
+        let quality = qp(&q, "quality");
+        direct = crate::ytm_player::visionos_audio_url(&id, &quality, &state)
+            .await
+            .unwrap_or_default();
+    }
     let cache_id = id.clone();
     std::thread::spawn(move || {
         let started = Instant::now();
-        if ensure_mp3_cached(&cache_id, &page, "").is_some() {
+        if ensure_mp3_cached(&cache_id, &page, &direct).is_some() {
             util::log_line(
                 "INFO",
                 &format!("prefetched {cache_id} in {} ms", started.elapsed().as_millis()),

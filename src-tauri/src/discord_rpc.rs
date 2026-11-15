@@ -63,7 +63,14 @@ pub enum Cmd {
 
 struct Shared {
     enabled: bool,
-    pipe: Option<Arc<Mutex<File>>>,
+    /// Read end of the duplicated pipe handle. The reader thread can block on its
+    /// own handle without starving the writer (the old design shared one File
+    /// behind a Mutex, so the blocking read held the lock forever and every
+    /// SET_ACTIVITY queued behind it).
+    reader: Option<Arc<Mutex<File>>>,
+    /// Write end; both the writer thread and the reader's PONG responses lock it
+    /// briefly (never across a blocking call).
+    writer: Option<Arc<Mutex<File>>>,
     last_activity: Option<Value>,
 }
 
@@ -81,7 +88,8 @@ impl DiscordRpc {
     pub fn new() -> Self {
         let shared = Arc::new(Mutex::new(Shared {
             enabled: false,
-            pipe: None,
+            reader: None,
+            writer: None,
             last_activity: None,
         }));
         let connected = Arc::new(AtomicBool::new(false));
@@ -116,7 +124,8 @@ impl DiscordRpc {
         if let Ok(mut guard) = self.shared.lock() {
             guard.enabled = enabled;
             if !enabled {
-                guard.pipe = None; // signal both threads to drop the pipe
+                guard.reader = None;
+                guard.writer = None;
                 guard.last_activity = guard.last_activity.take();
                 let _ = self.tx.lock().map(|tx| tx.send(Cmd::Clear));
             } else {
@@ -135,6 +144,9 @@ impl DiscordRpc {
     }
 
     pub fn set_activity(&self, track_info: Value) {
+        let title = track_info.get("title").and_then(Value::as_str).unwrap_or("?").to_string();
+        let artist = track_info.get("artist").and_then(Value::as_str).unwrap_or("?").to_string();
+        crate::util::log_line("INFO", &format!("discord rpc: activity update received ({artist} — {title})"));
         if let Ok(mut guard) = self.shared.lock() {
             guard.last_activity = Some(track_info.clone());
         }
@@ -162,20 +174,23 @@ fn try_connect(shared: &Arc<Mutex<Shared>>) {
         let Ok(mut file) = File::options().read(true).write(true).open(&path) else {
             continue;
         };
+        let Ok(mut read_end) = file.try_clone() else {
+            continue;
+        };
         let handshake = format!(r#"{{"v":1,"client_id":"{CLIENT_ID}"}}"#);
         if write_packet(&mut file, OP_HANDSHAKE, &handshake).is_err() {
             continue;
         }
         // Wait for READY/PING (reads block until a packet arrives; Discord is prompt).
-        match read_packet(&mut file) {
+        match read_packet(&mut read_end) {
             Ok((OP_FRAME, payload)) => {
                 let frame: Value = serde_json::from_slice(&payload).unwrap_or(Value::Null);
                 if frame.get("cmd").and_then(Value::as_str) == Some("DISPATCH")
                     && frame.get("evt").and_then(Value::as_str) == Some("READY")
                 {
-                    let arc = Arc::new(Mutex::new(file));
                     if let Ok(mut guard) = shared.lock() {
-                        guard.pipe = Some(arc);
+                        guard.reader = Some(Arc::new(Mutex::new(read_end)));
+                        guard.writer = Some(Arc::new(Mutex::new(file)));
                     }
                     crate::util::log_line("INFO", "discord rpc connected");
                     return;
@@ -185,9 +200,9 @@ fn try_connect(shared: &Arc<Mutex<Shared>>) {
             }
             Ok((OP_PING, payload)) => {
                 let _ = write_packet(&mut file, OP_PONG, &String::from_utf8_lossy(&payload));
-                let arc = Arc::new(Mutex::new(file));
                 if let Ok(mut guard) = shared.lock() {
-                    guard.pipe = Some(arc);
+                    guard.reader = Some(Arc::new(Mutex::new(read_end)));
+                    guard.writer = Some(Arc::new(Mutex::new(file)));
                 }
                 crate::util::log_line("INFO", "discord rpc connected (ping-first)");
                 return;
@@ -217,13 +232,14 @@ fn writer_loop(shared: Arc<Mutex<Shared>>, connected: Arc<AtomicBool>, rx: mpsc:
             }
             Ok(Cmd::Reconnect) => {
                 if let Ok(mut guard) = shared.lock() {
-                    guard.pipe = None;
+                    guard.reader = None;
+                    guard.writer = None;
                 }
                 had_pipe = false;
                 last_reconnect = Instant::now() - RECONNECT;
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                let has_pipe = shared.lock().map(|s| s.pipe.is_some()).unwrap_or(false);
+                let has_pipe = shared.lock().map(|s| s.writer.is_some()).unwrap_or(false);
                 if has_pipe && !had_pipe {
                     if let Some(activity) = &last_activity {
                         write_activity(&shared, activity, &connected);
@@ -245,19 +261,23 @@ fn writer_loop(shared: Arc<Mutex<Shared>>, connected: Arc<AtomicBool>, rx: mpsc:
 
 fn reader_loop(shared: Arc<Mutex<Shared>>, connected: Arc<AtomicBool>) {
     loop {
-        let pipe = shared.lock().ok().and_then(|s| s.pipe.clone());
+        let pipe = shared.lock().ok().and_then(|s| s.reader.clone());
         let Some(pipe) = pipe else {
             thread::sleep(READ_POLL);
             continue;
         };
+        // This thread blocks on its own read handle; the writer no longer shares
+        // the same File, so SET_ACTIVITY frames are never starved by the read.
         let packet = {
             let mut file = pipe.lock().unwrap_or_else(|p| p.into_inner());
             read_packet(&mut file)
         };
         match packet {
             Ok((OP_PING, payload)) => {
-                let mut file = pipe.lock().unwrap_or_else(|p| p.into_inner());
-                let _ = write_packet(&mut file, OP_PONG, &String::from_utf8_lossy(&payload));
+                if let Some(writer) = shared.lock().ok().and_then(|s| s.writer.clone()) {
+                    let mut file = writer.lock().unwrap_or_else(|p| p.into_inner());
+                    let _ = write_packet(&mut file, OP_PONG, &String::from_utf8_lossy(&payload));
+                }
             }
             Ok((OP_FRAME, payload)) => {
                 let frame: Value = serde_json::from_slice(&payload).unwrap_or(Value::Null);
@@ -272,7 +292,8 @@ fn reader_loop(shared: Arc<Mutex<Shared>>, connected: Arc<AtomicBool>) {
             Ok((OP_CLOSE, _)) | Err(_) => {
                 connected.store(false, Ordering::Relaxed);
                 if let Ok(mut guard) = shared.lock() {
-                    guard.pipe = None;
+                    guard.reader = None;
+                    guard.writer = None;
                 }
             }
             Ok(_) => {}
@@ -340,11 +361,11 @@ fn call_set_clear(pipe: &Arc<Mutex<File>>, pid: u32) -> std::io::Result<()> {
 }
 
 fn write_activity(shared: &Arc<Mutex<Shared>>, activity: &Value, connected: &Arc<AtomicBool>) {
-    let pipe = shared.lock().ok().and_then(|s| s.pipe.clone());
+    let pipe = shared.lock().ok().and_then(|s| s.writer.clone());
     let Some(pipe) = pipe else {
         // Trigger a connect attempt immediately; the retry loop will re-send.
         if let Ok(mut guard) = shared.lock() {
-            guard.pipe = None;
+            guard.writer = None;
         }
         return;
     };
@@ -356,18 +377,19 @@ fn write_activity(shared: &Arc<Mutex<Shared>>, activity: &Value, connected: &Arc
             let artist = activity.get("artist").and_then(Value::as_str).unwrap_or("?");
             crate::util::log_line("INFO", &format!("discord activity sent: {artist} — {title}"));
         }
-        Err(_) => {
+        Err(e) => {
             connected.store(false, Ordering::Relaxed);
             if let Ok(mut guard) = shared.lock() {
-                guard.pipe = None;
+                guard.reader = None;
+                guard.writer = None;
             }
-            crate::util::log_line("WARN", "discord activity write failed");
+            crate::util::log_line("WARN", &format!("discord activity write failed: {e}"));
         }
     }
 }
 
 fn write_clear(shared: &Arc<Mutex<Shared>>, connected: &Arc<AtomicBool>) {
-    let pipe = shared.lock().ok().and_then(|s| s.pipe.clone());
+    let pipe = shared.lock().ok().and_then(|s| s.writer.clone());
     let Some(pipe) = pipe else {
         connected.store(false, Ordering::Relaxed);
         return;
@@ -378,7 +400,8 @@ fn write_clear(shared: &Arc<Mutex<Shared>>, connected: &Arc<AtomicBool>) {
         Err(_) => {
             connected.store(false, Ordering::Relaxed);
             if let Ok(mut guard) = shared.lock() {
-                guard.pipe = None;
+                guard.reader = None;
+                guard.writer = None;
             }
         }
     }

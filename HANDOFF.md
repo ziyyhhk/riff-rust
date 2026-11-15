@@ -133,6 +133,18 @@ Release process used for v0.1.x: bump `version` in `package.json`, `src-tauri/Ca
     looked like the app skipping to other music). `playTrack` and
     `recoverCurrentStreamOnce` retry twice (the second pass uses `forceYtDlp=1`) before
     any failure is recorded or shown.
+22. Signed googlevideo URLs throttle a whole-file GET (30–60 KB/s, multi-minute
+    hangs) but serve 1 MB `Range` chunks at ~3 MB/s. `ranged_download_to_file`
+    pulls in `bytes=N-N+1MB` slices; `/api/stream-info`'s YouTube path now
+    transcodes synchronously to a guaranteed MP3 (WebView2 on this machine can't
+    decode AAC/m4a — code=4) instead of handing over an unplayable proxy URL.
+    `/api/prefetch` resolves the VISIONOS URL up front so prefetch uses the
+    Range path too. yt-dlp remains the last resort, never the first choice.
+23. Discord Rich Presence (`discord_rpc.rs`) splits the pipe into two handles via
+    `File::try_clone()`: the reader thread blocks on its own handle while the
+    writer locks the write end only for the duration of `write_packet`. The old
+    single `Arc<Mutex<File>>` blocked forever in `read_exact`, starving every
+    `SET_ACTIVITY`. `set_activity` logs "discord rpc: activity update received".
 
 ## Done (see PORTING.md)
 

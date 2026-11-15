@@ -117,7 +117,14 @@
     setMiniLyrics: (enabled) => invoke('set_mini_lyrics', { enabled }),
 
     // --- discord rich presence ---
-    discordRpcUpdate: (trackInfo) => invoke('discord_rpc_update', { trackInfo }),
+    discordRpcUpdate: (trackInfo) => invoke('discord_rpc_update', { trackInfo })
+      .catch(e => {
+        try {
+          if (window.__riffLogError) {
+            window.__riffLogError('ERROR', 'discord rpc update failed: ' + ((e && e.message) ? e.message : String(e)));
+          }
+        } catch (_) {}
+      }),
     discordRpcClear: () => invoke('discord_rpc_clear'),
     discordRpcSetEnabled: (enabled) => invoke('discord_rpc_set_enabled', { enabled }),
     discordRpcGetEnabled: () => invoke('discord_rpc_get_enabled'),
