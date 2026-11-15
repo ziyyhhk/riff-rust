@@ -168,51 +168,31 @@ impl DiscordRpc {
     }
 }
 
+/// Open a pipe and register the two handles immediately. The old code blocked
+/// this thread on `read_packet` waiting for READY; if Discord never answered,
+/// the writer thread parked forever and every SET_ACTIVITY queued behind it.
+/// The reader thread now owns the READY wait and clears the handles on EOF.
 fn try_connect(shared: &Arc<Mutex<Shared>>) {
     for id in 0..10 {
         let path = pipe_path(id);
         let Ok(mut file) = File::options().read(true).write(true).open(&path) else {
             continue;
         };
-        let Ok(mut read_end) = file.try_clone() else {
+        let Ok(read_end) = file.try_clone() else {
             continue;
         };
         let handshake = format!(r#"{{"v":1,"client_id":"{CLIENT_ID}"}}"#);
         if write_packet(&mut file, OP_HANDSHAKE, &handshake).is_err() {
             continue;
         }
-        // Wait for READY/PING (reads block until a packet arrives; Discord is prompt).
-        match read_packet(&mut read_end) {
-            Ok((OP_FRAME, payload)) => {
-                let frame: Value = serde_json::from_slice(&payload).unwrap_or(Value::Null);
-                if frame.get("cmd").and_then(Value::as_str) == Some("DISPATCH")
-                    && frame.get("evt").and_then(Value::as_str) == Some("READY")
-                {
-                    if let Ok(mut guard) = shared.lock() {
-                        guard.reader = Some(Arc::new(Mutex::new(read_end)));
-                        guard.writer = Some(Arc::new(Mutex::new(file)));
-                    }
-                    crate::util::log_line("INFO", "discord rpc connected");
-                    return;
-                }
-                crate::util::log_line("WARN", "discord rpc handshake returned unknown frame; dropping pipe");
-                return;
-            }
-            Ok((OP_PING, payload)) => {
-                let _ = write_packet(&mut file, OP_PONG, &String::from_utf8_lossy(&payload));
-                if let Ok(mut guard) = shared.lock() {
-                    guard.reader = Some(Arc::new(Mutex::new(read_end)));
-                    guard.writer = Some(Arc::new(Mutex::new(file)));
-                }
-                crate::util::log_line("INFO", "discord rpc connected (ping-first)");
-                return;
-            }
-            Ok(_) | Err(_) => {
-                crate::util::log_line("WARN", "discord rpc handshake failed; trying next pipe id");
-                return;
-            }
+        if let Ok(mut guard) = shared.lock() {
+            guard.reader = Some(Arc::new(Mutex::new(read_end)));
+            guard.writer = Some(Arc::new(Mutex::new(file)));
         }
+        crate::util::log_line("INFO", "discord rpc: pipe opened, waiting for READY");
+        return;
     }
+    crate::util::log_line("WARN", "discord rpc: no Discord pipe found");
 }
 
 fn writer_loop(shared: Arc<Mutex<Shared>>, connected: Arc<AtomicBool>, rx: mpsc::Receiver<Cmd>) {
@@ -283,9 +263,18 @@ fn reader_loop(shared: Arc<Mutex<Shared>>, connected: Arc<AtomicBool>) {
                 let frame: Value = serde_json::from_slice(&payload).unwrap_or(Value::Null);
                 match frame.get("cmd").and_then(Value::as_str) {
                     Some("DISPATCH") if frame.get("evt").and_then(Value::as_str) == Some("READY") => {
-                        connected.store(true, Ordering::Relaxed);
+                        let was_connected = connected.swap(true, Ordering::Relaxed);
+                        if !was_connected {
+                            crate::util::log_line("INFO", "discord rpc connected");
+                        }
                     }
-                    Some("SET_ACTIVITY") => {}
+                    Some("SET_ACTIVITY") => {
+                        if let Some(err) = frame.get("data").and_then(|d| d.get("code")).and_then(Value::as_i64) {
+                            if err != 0 {
+                                crate::util::log_line("WARN", &format!("discord rpc set_activity error {err}: {}", frame.get("data").and_then(|d| d.get("message")).and_then(Value::as_str).unwrap_or("?")));
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -295,6 +284,7 @@ fn reader_loop(shared: Arc<Mutex<Shared>>, connected: Arc<AtomicBool>) {
                     guard.reader = None;
                     guard.writer = None;
                 }
+                crate::util::log_line("WARN", "discord rpc: pipe dropped; will reconnect");
             }
             Ok(_) => {}
         }

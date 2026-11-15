@@ -145,6 +145,14 @@ Release process used for v0.1.x: bump `version` in `package.json`, `src-tauri/Ca
     writer locks the write end only for the duration of `write_packet`. The old
     single `Arc<Mutex<File>>` blocked forever in `read_exact`, starving every
     `SET_ACTIVITY`. `set_activity` logs "discord rpc: activity update received".
+24. `try_connect` never blocks on `read_packet` to wait for READY — the reader
+    thread owns READY detection and clears the handles on EOF, the writer thread
+    re-registers on its 250 ms tick (15 s backoff). Lyrics: per-frame
+    (60 FPS) `updateSyncedLyricsHighlight` is throttled to ~12.5 Hz. The karaoke
+    "album cover only" toggle hides all lyric lines (with full-screen-only by
+    default, no lyric surface is visible anywhere); `riff_tvk_cover_mode` is
+    reset to off once (`riff_tvk_cover_mode_reset_v1`) so lyrics reappear; the
+    user can re-enable it in the overlay.
 
 ## Done (see PORTING.md)
 

@@ -2594,6 +2594,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!window.electronAPI || !window.electronAPI.discordRpcUpdate) return;
     if (!track || !isPlaying) {
       if (window.electronAPI.discordRpcClear) window.electronAPI.discordRpcClear();
+      state._lastDiscordRpcSent = '';
+      state._lastDiscordRpcSentAt = 0;
       return;
     }
     track.artist = stripYoutubeTopic(track.artist);
@@ -2604,8 +2606,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (customArt && isHttpUrl(customArt.cover)) rpcThumb = customArt.cover;
     else if (isHttpUrl(track.thumbnail)) rpcThumb = track.thumbnail;
     else if (isHttpUrl(track.cover)) rpcThumb = track.cover;
-    const shareUrl = buildRiffShareUrl(track, '', '', 500);
     const curSec = (el.nativeAudio && Number.isFinite(el.nativeAudio.currentTime)) ? el.nativeAudio.currentTime : 0;
+    // The renderer calls this on every play/seek/timeupdate; collapse repeat
+    // sends of the same frame so Discord isn't fed the same activity every
+    // second. startTimestamp differs after a seek, so seeks always go through.
+    const startTimestamp = Math.floor(Date.now() / 1000 - curSec);
+    const dedupeKey = `${track.title || ''}|${track.artist || ''}|${startTimestamp}`;
+    const nowMs = Date.now();
+    if (state._lastDiscordRpcSent === dedupeKey && nowMs - (state._lastDiscordRpcSentAt || 0) < 1500) return;
+    state._lastDiscordRpcSent = dedupeKey;
+    state._lastDiscordRpcSentAt = nowMs;
+    const shareUrl = buildRiffShareUrl(track, '', '', 500);
     window.electronAPI.discordRpcUpdate({
       title: track.title || 'Unknown Track',
       artist: track.artist || 'Unknown Artist',
@@ -2614,7 +2625,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       thumbnail: rpcThumb,
       url: shareUrl,
       platform: track.platform || state.platform,
-      startTimestamp: Math.floor(Date.now() / 1000 - curSec)
+      startTimestamp
     });
   }
 
@@ -5827,8 +5838,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             prefetchNextQueueTrack();
           }
           if ((state.isTvKaraokeOpen || (state.isRightPanelOpen && el.rightPanel && !el.rightPanel.classList.contains('hidden'))) && state.syncedLyrics && state.syncedLyrics.length > 0) {
-            const smoothCur = state.isPlaying ? getSmoothAudioTime() : cur;
-            updateSyncedLyricsHighlight(smoothCur);
+            const nowMs = performance.now();
+            // 12.5 Hz is plenty for a lyric line; the old per-frame (60 FPS) loop
+            // hammered the DOM with style writes and showed as stutter.
+            if (!state._lastLyricHighlightAt || nowMs - state._lastLyricHighlightAt >= 80) {
+              state._lastLyricHighlightAt = nowMs;
+              const smoothCur = state.isPlaying ? getSmoothAudioTime() : cur;
+              updateSyncedLyricsHighlight(smoothCur);
+            }
           }
         }
 
@@ -36884,6 +36901,19 @@ function bindCoverHoldZoom(wrapEl) {
     if (localStorage.getItem('riff_failed_tracks_schema') !== '2') {
       localStorage.removeItem(FAILED_TRACKS_KEY);
       localStorage.setItem('riff_failed_tracks_schema', '2');
+    }
+  } catch (_) {}
+
+  // Karaoke "album cover only" hides the lyric lines completely (and with the
+  // full-screen-only default, that leaves no visible lyric surface anywhere).
+  // This reset shows them again once; users can re-enable cover mode in the
+  // karaoke overlay afterwards.
+  try {
+    if (localStorage.getItem('riff_tvk_cover_mode_reset_v1') !== '1') {
+      if (localStorage.getItem('riff_tvk_cover_mode') === '1') {
+        localStorage.setItem('riff_tvk_cover_mode', '0');
+      }
+      localStorage.setItem('riff_tvk_cover_mode_reset_v1', '1');
     }
   } catch (_) {}
 
