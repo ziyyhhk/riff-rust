@@ -86,10 +86,15 @@ Release process used for v0.1.x: bump `version` in `package.json`, `src-tauri/Ca
     local library → playable cache (mp3/wav/flac) → any cached track re-encoded to mp3
     (source m4a deleted) → SoundCloud direct resolve (progressive MP3, ~1 s) → stream
     cache (10 min) → direct inner-API / v1/player → yt-dlp fallback. The renderer's second
-    retry passes `forceYtDlp=1`; it now transcodes via ffmpeg into `tracks/<id>.mp3` in a
-    blocking task and returns `/api/local-track?id=<id>` (guaranteed decode) instead of
-    another AAC stream. On this Media-Foundation-broken machine, first play of a track
-    costs one automatic retry + transcode (~3–8 s), then plays from the local file forever.
+    retry passes `forceYtDlp=1`; it now transcodes into `tracks/<id>.mp3` (single-flight,
+    `ensure_mp3_cached`) and returns `/api/local-track?id=<id>` (guaranteed decode).
+    **The inner-API (iOS client) googlevideo URL only serves its first ~256 KB and 403s
+    every later byte** — never rely on it for downloads or full playback. All caching goes
+    through yt-dlp (`ytdlp_download_target`, ~8-15 s/run, hidden console, 150 s cap).
+    `/api/prefetch` + the renderer's next-track prefetch produce the MP3 while the current
+    track plays; `/api/cached` lets playTrack swap a stale proxy URL for the local file.
+    Cache production is deduped in `cache_work()` — prefetch and recovery never run two
+    yt-dlp downloads for one track.
 18. SoundCloud has no auth-free "API key" in the repo: the public `client_id` is scraped
     from the front page's `a-v2.sndcdn.com/assets/*.js` bundles (cached 12 h in `state.rs`).
     `GET api-v2.soundcloud.com/search/tracks?q=...&client_id=...` works for search (~0.6 s);

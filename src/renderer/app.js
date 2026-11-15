@@ -7368,6 +7368,13 @@ document.addEventListener('DOMContentLoaded', async () => {
           nextTrack.resolvedYtId = data.resolvedId;
         }
         warmUpNextAudioBuffer(data.streamUrl);
+        // Make sure a local MP3 exists for the next track before it starts:
+        // the next transition becomes a cache hit instead of a 10-15 s yt-dlp
+        // download. Deduped server-side, so this is free when already cached.
+        const pfId = nextTrack.resolvedYtId || nextTrack.id || '';
+        if (pfId) {
+          fetch(`http://127.0.0.1:${state.serverPort}/api/prefetch?id=${encodeURIComponent(pfId)}&url=${encodeURIComponent(nextTrack.url || '')}&platform=${encodeURIComponent(nextTrack.platform || 'ytmusic')}`).catch(() => {});
+        }
       }
     } catch (_) {}
   }
@@ -7747,7 +7754,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       if (track._preloadedStreamUrl && !(track._errorRetryStage > 0)) {
-        const preloadedUrl = track._preloadedStreamUrl;
+        let preloadedUrl = track._preloadedStreamUrl;
+        // Prefer the local MP3 the prefetcher produced. Signed CDN URLs only
+        // serve ~256 KB here, so starting with one guarantees a decode error
+        // and a long yt-dlp fallback even though the file is already cached.
+        if (!/\/api\/local-track|^file:/.test(preloadedUrl)) {
+          try {
+            const probeId = track.resolvedYtId || track.id;
+            if (probeId) {
+              const c = await fetch(`http://127.0.0.1:${state.serverPort}/api/cached?id=${encodeURIComponent(probeId)}`).then(r => r.json());
+              if (c && c.cached && c.localUrl) preloadedUrl = c.localUrl;
+            }
+          } catch (_) {}
+        }
         delete track._preloadedStreamUrl;
         delete track._preloadedAt;
         if (currentToken !== state.loadToken) return;
@@ -15718,6 +15737,10 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (d && d.success && d.streamUrl) {
             track._preloadedStreamUrl = d.streamUrl;
             track._preloadedStreamQuality = quality;
+            const pfId = track.resolvedYtId || track.id || '';
+            if (pfId) {
+              fetch(`http://127.0.0.1:${state.serverPort}/api/prefetch?id=${encodeURIComponent(pfId)}&url=${encodeURIComponent(track.url || '')}&platform=${encodeURIComponent(track.platform || 'ytmusic')}`).catch(() => {});
+            }
           } else {
             prefetchedTrackKeys.delete(key);
           }
