@@ -201,46 +201,284 @@ async fn ytdlp_search(state: &Shared, target: &str, platform_name: &str) -> Resu
     Ok(tracks)
 }
 
-/// Download a resolved YouTube stream to `tracks/<id>.<ext>` in the background
-/// (upstream parity). Repeat plays and cross-episode caching then never hit the
-/// network again. Best-effort: any failure leaves the file missing and the next
-/// stream-info call simply retries.
-fn cache_resolved_stream(resolved_id: &str, ext: &str, url: &str) {
-    if resolved_id.len() != 11 {
+/// MP3/WAV/FLAC decode everywhere on this machine; m4a/aac/webm/ogg do not.
+fn playable_ext(ext: &str) -> bool {
+    matches!(ext.to_ascii_lowercase().as_str(), "mp3" | "wav" | "flac")
+}
+
+/// Cache file ids go into file paths; keep them to a conservative charset.
+fn is_valid_cache_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 16
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn cached_mp3_path(resolved_id: &str) -> PathBuf {
+    util::cache_dir().join(format!("{resolved_id}.mp3"))
+}
+
+/// Unique temp path inside the cache dir (pid + a random suffix), safe for any
+/// number of concurrent transcode/download workers on the same track id.
+fn unique_tmp(resolved_id: &str, tag: &str) -> PathBuf {
+    util::cache_dir().join(format!(
+        "{resolved_id}.{tag}-{}-{}",
+        std::process::id(),
+        rand::random::<u64>()
+    ))
+}
+
+/// Write `bytes` to cache atomically (tmp + rename). Best effort.
+fn write_cache_file(tmp: &std::path::Path, target: &std::path::Path) -> bool {
+    if fs::rename(tmp, target).is_ok() {
+        return true;
+    }
+    let ok = fs::copy(tmp, target).is_ok();
+    let _ = fs::remove_file(tmp);
+    ok
+}
+
+/// One download attempt for `url` into `target` (reqwest, rustls).
+fn download_once(url: &str, target: &std::path::Path) -> Result<u64, String> {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("client build failed: {e}"))?;
+    let mut response = client
+        .get(url)
+        .send()
+        .map_err(|e| format!("request failed: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("status {}", response.status().as_u16()));
+    }
+    if let Some(expected) = response.content_length() {
+        if expected > 96 * 1024 * 1024 {
+            return Err(format!("stream too large ({expected} bytes)"));
+        }
+    }
+    let mut file = fs::File::create(target).map_err(|e| format!("create failed: {e}"))?;
+    std::io::copy(&mut response, &mut file).map_err(|e| format!("copy failed: {e}"))
+}
+
+/// Stream-download `url` into `target`, retrying a few times: googlevideo edges
+/// occasionally drop a connection mid-body. ffmpeg is never allowed to touch the
+/// network (it 403s), so this is the only way audio leaves the CDN.
+fn download_to_file(url: &str, target: &std::path::Path) -> bool {
+    for attempt in 1..=3u8 {
+        match download_once(url, target) {
+            Ok(written) if written > 0 => return true,
+            Ok(_) => util::log_line("WARN", &format!("download attempt {attempt}: empty body")),
+            Err(e) => util::log_line("WARN", &format!("download attempt {attempt}: {e}")),
+        }
+        let _ = fs::remove_file(target);
+    }
+    false
+}
+
+/// Fallback when reqwest cannot finish: download the watch page with yt-dlp itself
+/// and hand back the resulting file. Slower but extremely reliable here.
+fn ytdlp_download(resolved_id: &str) -> Option<PathBuf> {
+    if resolved_id.len() != 11
+        || !resolved_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+    let bin = util::resolve_binary("yt-dlp")?;
+    let prefix = unique_tmp(resolved_id, "ytdl");
+    let template = format!("{}.%(ext)s", prefix.to_string_lossy());
+    let args = vec![
+        "-q".to_string(),
+        "--no-warnings".to_string(),
+        "--no-playlist".to_string(),
+        "-f".to_string(),
+        "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio".to_string(),
+        "--no-part".to_string(),
+        "-o".to_string(),
+        template.clone(),
+        format!("https://www.youtube.com/watch?v={resolved_id}"),
+    ];
+    let mut cmd = std::process::Command::new(bin);
+    cmd.args(&args);
+    util::hide_console(&mut cmd);
+    let status = cmd.status().ok()?;
+    if !status.success() {
+        util::log_line("WARN", &format!("yt-dlp fallback download failed for {resolved_id}"));
+        return None;
+    }
+    let prefix_str = prefix.to_string_lossy().to_string();
+    let entries = fs::read_dir(util::cache_dir()).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.to_string_lossy().starts_with(&prefix_str) && path.is_file() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Transcode any source (local file or downloaded temp copy) to MP3 via ffmpeg.
+/// Returns true on success.
+fn ffmpeg_transcode_to_mp3(ffmpeg: &std::path::Path, input: &str, tmp: &std::path::Path) -> bool {
+    let mut cmd = std::process::Command::new(ffmpeg);
+    cmd.arg("-hide_banner")
+        .arg("-nostdin")
+        .arg("-y")
+        .arg("-i")
+        .arg(input)
+        .arg("-vn")
+        .arg("-c:a")
+        .arg("libmp3lame")
+        .arg("-q:a")
+        .arg("4")
+        .arg("-f")
+        .arg("mp3")
+        .arg(tmp);
+    util::hide_console(&mut cmd);
+    match cmd.output() {
+        Ok(out) => {
+            if out.status.success() {
+                true
+            } else {
+                let tail: String = String::from_utf8_lossy(&out.stderr)
+                    .lines()
+                    .last()
+                    .unwrap_or("")
+                    .chars()
+                    .take(200)
+                    .collect();
+                util::log_line("WARN", &format!("ffmpeg transcode failed: {tail}"));
+                false
+            }
+        }
+        Err(e) => {
+            util::log_line("WARN", &format!("ffmpeg spawn failed: {e}"));
+            false
+        }
+    }
+}
+
+/// Background: pull a resolved stream into `tracks/<id>.mp3` so repeat plays are
+/// local and decode on machines without AAC/Opus support (this build of WebView2
+/// included). Progressive MP3 CDN links are stored byte-for-byte; everything else
+/// is decoded/re-encoded by ffmpeg. Best effort: failure leaves the file missing
+/// and the next stream-info call simply retries.
+fn cache_resolved_stream(resolved_id: &str, _ext_hint: &str, url: &str) {
+    if !is_valid_cache_id(resolved_id) {
         return;
     }
-    let target = util::cache_dir().join(format!("{resolved_id}.{ext}"));
+    let target = cached_mp3_path(resolved_id);
     if target.is_file() {
         return;
     }
-    let client = match reqwest::blocking::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-        .connect_timeout(std::time::Duration::from_secs(8))
-        .timeout(std::time::Duration::from_secs(90))
-        .build()
-    {
-        Ok(client) => client,
-        Err(_) => return,
-    };
-    let Ok(response) = client.get(url).send() else {
-        return;
-    };
-    let Ok(bytes) = response.bytes() else {
-        return;
-    };
-    if bytes.is_empty() || bytes.len() > 128 * 1024 * 1024 {
-        return;
-    }
     let _ = fs::create_dir_all(util::cache_dir());
-    let tmp = target.with_extension(format!("{ext}.download"));
-    if fs::write(&tmp, &bytes).is_ok() {
-        if fs::rename(&tmp, &target).is_err() {
-            let _ = fs::copy(&tmp, &target);
+    let tmp = unique_tmp(resolved_id, "mp3.part");
+    let started = Instant::now();
+    let url_path = url.split('?').next().unwrap_or(url);
+    let looks_like_mp3 = url_path.to_ascii_lowercase().ends_with(".mp3");
+    util::log_line("INFO", &format!("background mp3 cache: {resolved_id} (mp3={looks_like_mp3})"));
+    if looks_like_mp3 {
+        if !download_to_file(url, &tmp) {
             let _ = fs::remove_file(&tmp);
+            util::log_line("WARN", &format!("background mp3 cache: download failed for {resolved_id}"));
+            return;
         }
-        util::log_line("INFO", &format!("cached stream {resolved_id} -> {}", target.display()));
+    } else {
+        let Some(ffmpeg) = util::resolve_binary("ffmpeg") else {
+            util::log_line("WARN", "ffmpeg missing; skipping background mp3 cache");
+            return;
+        };
+        let src = unique_tmp(resolved_id, "download");
+        if !download_to_file(url, &src) {
+            let _ = fs::remove_file(&src);
+            util::log_line("WARN", &format!("background mp3 cache: download failed for {resolved_id}"));
+            return;
+        }
+        let ok = ffmpeg_transcode_to_mp3(&ffmpeg, &src.to_string_lossy(), &tmp);
+        let _ = fs::remove_file(&src);
+        if !ok {
+            let _ = fs::remove_file(&tmp);
+            util::log_line("WARN", &format!("background mp3 cache: transcode failed for {resolved_id}"));
+            return;
+        }
+    }
+    if write_cache_file(&tmp, &target) {
+        util::log_line(
+            "INFO",
+            &format!("cached stream {resolved_id} -> {} ({} ms)", target.display(), started.elapsed().as_millis()),
+        );
     } else {
         let _ = fs::remove_file(&tmp);
+    }
+}
+
+/// Synchronously transcode a remote URL (or local file) into `tracks/<id>.mp3`.
+/// Used when the player reports a decode failure (MEDIA_ERR_SRC_NOT_SUPPORTED):
+/// the renderer retries stream-info with `forceYtDlp=1` and gets a guaranteed
+/// playable local file instead of another unplayable AAC/Opus stream.
+fn transcode_to_cache_sync(resolved_id: &str, input: &str) -> Option<PathBuf> {
+    if !is_valid_cache_id(resolved_id) {
+        return None;
+    }
+    let target = cached_mp3_path(resolved_id);
+    if target.is_file() {
+        return Some(target);
+    }
+    let _ = fs::create_dir_all(util::cache_dir());
+    let tmp = unique_tmp(resolved_id, "mp3.part");
+    let Some(ffmpeg) = util::resolve_binary("ffmpeg") else {
+        util::log_line("WARN", "ffmpeg missing; cannot transcode to mp3");
+        return None;
+    };
+    let started = Instant::now();
+    let is_url = input.starts_with("http://") || input.starts_with("https://");
+    let src_owned;
+    let mut downloaded_by_ytdlp: Option<PathBuf> = None;
+    let src = if is_url {
+        let src_path = unique_tmp(resolved_id, "download");
+        if !download_to_file(input, &src_path) {
+            let _ = fs::remove_file(&src_path);
+            // Last-resort fallback for flaky googlevideo edges: let yt-dlp grab the file.
+            if let Some(fallback) = ytdlp_download(resolved_id) {
+                src_owned = fallback.to_string_lossy().to_string();
+                downloaded_by_ytdlp = Some(fallback);
+                src_owned.as_str()
+            } else {
+                util::log_line("WARN", &format!("transcode failed (download) for {resolved_id}"));
+                return None;
+            }
+        } else {
+            src_owned = src_path.to_string_lossy().to_string();
+            src_owned.as_str()
+        }
+    } else {
+        input
+    };
+    let ok = ffmpeg_transcode_to_mp3(&ffmpeg, src, &tmp);
+    if is_url {
+        let _ = fs::remove_file(src);
+    }
+    if let Some(fallback) = downloaded_by_ytdlp {
+        let _ = fs::remove_file(&fallback);
+    }
+    if !ok {
+        let _ = fs::remove_file(&tmp);
+        util::log_line("WARN", &format!("transcode failed for {resolved_id}"));
+        return None;
+    }
+    if write_cache_file(&tmp, &target) {
+        util::log_line(
+            "INFO",
+            &format!("transcoded {resolved_id} -> {} ({} ms)", target.display(), started.elapsed().as_millis()),
+        );
+        Some(target)
+    } else {
+        let _ = fs::remove_file(&tmp);
+        None
     }
 }
 
@@ -261,9 +499,24 @@ async fn search(State(state): State<Shared>, Query(q): Query<HashMap<String, Str
         {
             return json_ok(json!({ "success": true, "tracks": cached }));
         }
+        let sc_search_target = format!("scsearch{}:{}", limit, query.trim());
+        let soundcloud_search = crate::soundcloud::search_tracks(&state, query.trim(), limit);
+        let soundcloud_fallback = ytdlp_search(&state, &sc_search_target, "soundcloud");
+        let sc_tracks_future = async move {
+            match soundcloud_search.await {
+                Ok(tracks) => Ok(tracks),
+                Err(e) => {
+                    util::log_line("WARN", &format!("{e}; falling back to yt-dlp soundcloud search"));
+                    match tokio::time::timeout(Duration::from_secs(25), soundcloud_fallback).await {
+                        Ok(result) => result,
+                        Err(_) => Err("soundcloud search timed out".to_string()),
+                    }
+                }
+            }
+        };
         let (ytm_tracks, sc_tracks) = futures_util::future::join(
             ytm::search(&state.http(), query.trim(), limit),
-            ytdlp_search(&state, &format!("scsearch{}:{}", limit, query.trim()), "soundcloud"),
+            sc_tracks_future,
         )
         .await;
         let ytm_tracks = ytm_tracks.unwrap_or_default();
@@ -295,6 +548,39 @@ async fn search(State(state): State<Shared>, Query(q): Query<HashMap<String, Str
         }
         state::cache_put(&state.search_cache, cache_key, combined.clone(), 128, Duration::from_secs(300));
         return json_ok(json!({ "success": true, "tracks": combined }));
+    }
+
+    // Fast path: direct SoundCloud search. No child process, ~1 s.
+    if platform.eq_ignore_ascii_case("soundcloud") {
+        let cache_key = format!("sc:{}:{}", limit, query.trim().to_lowercase());
+        if let Some(cached) =
+            state::cache_get(&state.search_cache, &cache_key, Duration::from_secs(300))
+        {
+            return json_ok(json!({ "success": true, "tracks": cached }));
+        }
+        match crate::soundcloud::search_tracks(&state, query.trim(), limit).await {
+            Ok(tracks) if !tracks.is_empty() => {
+                let mut tracks = tracks;
+                for t in tracks.iter_mut() {
+                    if let Some(map) = t.as_object_mut() {
+                        if let Some(id) = map.get("id").and_then(|v| v.as_str()).map(String::from) {
+                            let cached = library::find_track_by_id(&id).is_some();
+                            map.insert("isCached".to_string(), json!(cached));
+                        }
+                    }
+                }
+                state::cache_put(
+                    &state.search_cache,
+                    cache_key,
+                    tracks.clone(),
+                    128,
+                    Duration::from_secs(300),
+                );
+                return json_ok(json!({ "success": true, "tracks": tracks }));
+            }
+            Ok(_) => util::log_line("INFO", "soundcloud search returned no tracks; using yt-dlp"),
+            Err(e) => util::log_line("WARN", &format!("{e}; using yt-dlp")),
+        }
     }
 
     // Fast path: direct YouTube Music search. No child process, no Python startup.
@@ -340,19 +626,52 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
     let title = qp(&q, "title");
     let artist = qp(&q, "artist");
     let duration_q = qp(&q, "duration");
+    let quality = qp(&q, "quality");
+    let platform = qp(&q, "platform").to_ascii_lowercase();
+    // Set by the renderer on its second retry after a decode failure; it means
+    // the direct CDN stream would not play, so hand back a local MP3 instead.
+    let force_yt_dlp = q.get("forceYtDlp").map(|v| v == "1").unwrap_or(false);
 
-    // Local import?
-    if library::find_track_by_id(&id).is_some() {
-        let port = state.server_port;
-        return json_ok(json!({
-            "success": true,
-            "isLocal": true,
-            "streamUrl": format!("http://127.0.0.1:{port}/api/local-track?id={id}"),
-            "resolvedId": id,
-            "title": title,
-            "artist": artist,
-            "duration": duration_q.parse::<u64>().unwrap_or(0),
-        }));
+    // Local import (library/ directory)? Bare video-id cache hits are NOT handled
+    // here: they flow into the playable-cache and transcode lanes below, which know
+    // the difference between decodeable (mp3/wav/flac) and code=4 files (m4a/webm).
+    if id.starts_with("local_") || id.starts_with("riff-") {
+        if let Some(path) = library::find_track_by_id(&id) {
+            let ext = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_string())
+                .unwrap_or_else(|| "mp3".into());
+            let local_payload = |mime: &str| {
+                let port = state.server_port;
+                json_ok(json!({
+                    "success": true,
+                    "isLocal": true,
+                    "mimeType": mime,
+                    "streamUrl": format!("http://127.0.0.1:{port}/api/local-track?id={id}"),
+                    "resolvedId": id,
+                    "title": title,
+                    "artist": artist,
+                    "duration": duration_q.parse::<u64>().unwrap_or(0),
+                }))
+            };
+            // Playable as-is (mp3/wav/flac)? serve directly.
+            if playable_ext(&ext) {
+                return local_payload(util::mime_from_ext(&ext));
+            }
+            // m4a/webm/ogg on a webview that cannot decode them: transcode once
+            // into the tracks cache; the original library file is left untouched.
+            let mp3_id = id.clone();
+            let mp3_src = path.to_string_lossy().to_string();
+            let res = tokio::task::spawn_blocking(move || {
+                transcode_to_cache_sync(&mp3_id, &mp3_src)
+            })
+            .await;
+            if let Ok(Some(_)) = res {
+                return local_payload("audio/mpeg");
+            }
+            // Machines with working codecs: hand back the original file anyway.
+            return local_payload(util::mime_from_ext(&ext));
+        }
     }
 
     let target = if !url.trim().is_empty() {
@@ -363,9 +682,12 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         return json_err(StatusCode::BAD_REQUEST, "missing url or id");
     };
 
-    // Downloaded cache hit?
-    if let Some(path) = library::find_cached_by_id(&id) {
-        let ext = path.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_else(|| "mp3".into());
+    // Downloaded cache hit? Serve the local file; instant and works offline.
+    if let Some(path) = library::find_playable_cached_by_id(&id) {
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_else(|| "mp3".into());
         let mime = util::mime_from_ext(&ext);
         let port = state.server_port;
         return json_ok(json!({
@@ -380,19 +702,138 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         }));
     }
 
-    let quality = qp(&q, "quality");
+    // Only unplayable cache files (m4a/webm/aac)? Transcode once to MP3 so the
+    // WebView2 Media Foundation decoder (mp3/wav/flac only on this machine) gets a
+    // stream it can actually render; then drop the unplayable source (disk hygiene).
+    if let Some(path) = library::find_any_cached_by_id(&id) {
+        let input_id = id.clone();
+        let input = path.to_string_lossy().to_string();
+        let res = tokio::task::spawn_blocking(move || {
+            transcode_to_cache_sync(&input_id, &input)
+        })
+        .await;
+        if let Ok(Some(_)) = res {
+            let _ = fs::remove_file(&path);
+            let port = state.server_port;
+            return json_ok(json!({
+                "success": true,
+                "isLocal": true,
+                "mimeType": "audio/mpeg",
+                "streamUrl": format!("http://127.0.0.1:{port}/api/local-track?id={id}"),
+                "resolvedId": id,
+                "title": title,
+                "artist": artist,
+                "duration": duration_q.parse::<u64>().unwrap_or(0),
+            }));
+        }
+        util::log_line("WARN", &format!("could not transcode cached stream {id}; resolving fresh"));
+    }
+
+    let is_soundcloud = platform == "soundcloud" || url.to_ascii_lowercase().contains("soundcloud.com");
+
+    // SoundCloud direct path: resolve the permalink to a progressive MP3 in about
+    // a second over SoundCloud's JSON API instead of spawning yt-dlp (about 10 to
+    // 25 seconds). Falls back to yt-dlp below when the direct resolve fails.
+    if is_soundcloud {
+        match crate::soundcloud::resolve_progressive_mp3(&state, &url).await {
+            Some(mp3_url) => {
+                let port = state.server_port;
+                let cache_id = if id.len() <= 16
+                    && id
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                {
+                    id.clone()
+                } else {
+                    format!("sc{}", &util::sha1_hex(url.as_bytes())[..11])
+                };
+                let proxied = format!(
+                    "http://127.0.0.1:{port}/api/audio-proxy?url={}",
+                    util::percent_encode(&mp3_url)
+                );
+                {
+                    let dl_url = mp3_url.clone();
+                    let dl_id = cache_id.clone();
+                    std::thread::spawn(move || cache_resolved_stream(&dl_id, "mp3", &dl_url));
+                }
+                let payload = json!({
+                    "success": true,
+                    "isLocal": false,
+                    "streamUrl": proxied,
+                    "rawStreamUrl": mp3_url,
+                    "proxyUrl": proxied,
+                    "isHls": false,
+                    "binaryNote": Value::Null,
+                    "mimeType": "audio/mpeg",
+                    "resolvedId": cache_id,
+                    "duration": duration_q.parse::<u64>().unwrap_or(0),
+                    "title": title,
+                    "artist": artist,
+                    "thumbnail": "",
+                    "direct": true,
+                });
+                state::cache_put(
+                    &state.stream_cache,
+                    format!("stream:{}:{}:{}", qp(&q, "quality"), id, url),
+                    payload.clone(),
+                    256,
+                    Duration::from_secs(600),
+                );
+                return json_ok(payload);
+            }
+            None => {
+                util::log_line("INFO", "soundcloud: direct resolve failed; falling back to yt-dlp");
+            }
+        }
+    }
+
     // Repeated plays of the same track used to spawn yt-dlp every time. Cache the
     // resolved URL briefly; YouTube signatures/URLs are short-lived, so keep the TTL tight.
+    // `bust` (and the renderer's decode-failure retry) bypasses the cache entirely.
+    let no_cache = force_yt_dlp || q.contains_key("bust");
     let cache_key = format!("stream:{quality}:{id}:{target}");
-    if let Some(cached) =
-        state::cache_get(&state.stream_cache, &cache_key, Duration::from_secs(600))
-    {
-        return json_ok(cached);
+    if !no_cache {
+        if let Some(cached) =
+            state::cache_get(&state.stream_cache, &cache_key, Duration::from_secs(600))
+        {
+            return json_ok(cached);
+        }
+    }
+
+    // Forced re-encode lane (renderer's post-failure retry, forceYtDlp=1): resolve
+    // with the inner API and transcode straight to a local MP3. Skips the whole
+    // yt-dlp Python spawn (~8-10 s) that the fallback below would otherwise pay.
+    if force_yt_dlp && !is_soundcloud {
+        if let Some(direct_url) = crate::ytm_player::direct_audio_url(&id, &quality, &state).await {
+            let input = direct_url.clone();
+            let tid = id.clone();
+            let res = tokio::task::spawn_blocking(move || {
+                transcode_to_cache_sync(&tid, &input)
+            })
+            .await;
+            if let Ok(Some(_)) = res {
+                let port = state.server_port;
+                return json_ok(json!({
+                    "success": true,
+                    "isLocal": true,
+                    "mimeType": "audio/mpeg",
+                    "streamUrl": format!("http://127.0.0.1:{port}/api/local-track?id={id}"),
+                    "resolvedId": id,
+                    "title": title,
+                    "artist": artist,
+                    "duration": duration_q.parse::<u64>().unwrap_or(0),
+                }));
+            }
+        }
+        // inner API or transcode failed: fall back to the yt-dlp path with a local transcode after resolve
     }
 
     // Fast path: inner youtubei `/v1/player` — no subprocess, ~0.2-0.5s.
-    if let Some(direct_url) = crate::ytm_player::direct_audio_url(&id, &quality, &state).await {
-        let resolved_id = id.clone();
+    // Skipped when the renderer asked to force yt-dlp after a decode failure or
+    // for SoundCloud links (SoundCloud uses its own direct resolver above).
+    if !force_yt_dlp && !is_soundcloud {
+        if let Some(direct_url) = crate::ytm_player::direct_audio_url(&id, &quality, &state).await {
+            let resolved_id = id.clone();
         let port = state.server_port;
         let proxied = format!(
             "http://127.0.0.1:{port}/api/audio-proxy?url={}",
@@ -422,11 +863,17 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         }
         state::cache_put(&state.stream_cache, cache_key, payload.clone(), 256, Duration::from_secs(600));
         return json_ok(payload);
+        }
     }
-    let format_arg = match quality.as_str() {
-        "low" | "worst" => "worstaudio[ext=m4a]/worstaudio",
-        "medium" => "bestaudio[abr<=96][ext=m4a]/bestaudio[ext=m4a]/bestaudio[abr<=96]/bestaudio",
-        _ => "bestaudio[ext=m4a]/bestaudio[ext=mp4]/bestaudio",
+    let format_arg = if is_soundcloud {
+        // SoundCloud serves progressive MP3; grabbing it skips the AAC/Opus decode gap
+        "http_mp3_128/bestaudio[ext=mp3][protocol^=http]/bestaudio[ext=mp3]/bestaudio[protocol^=http]/bestaudio".to_string()
+    } else {
+        match quality.as_str() {
+            "low" | "worst" => "worstaudio[ext=m4a]/worstaudio".to_string(),
+            "medium" => "bestaudio[abr<=96][ext=m4a]/bestaudio[ext=m4a]/bestaudio[abr<=96]/bestaudio".to_string(),
+            _ => "bestaudio[ext=m4a]/bestaudio[ext=mp4]/bestaudio".to_string(),
+        }
     };
 
     let args = vec![
@@ -438,7 +885,7 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         "--retries".to_string(),
         "1".to_string(),
         "--format".to_string(),
-        format_arg.to_string(),
+        format_arg,
         target.clone(),
     ];
     let state_for_task = state.clone();
@@ -492,6 +939,33 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
     // Match upstream's shape: the renderer picks `proxyUrl || streamUrl` for
     // non-local tracks. The raw CDN URL breaks the Web Audio pipeline because
     // googlevideo.com does not send CORS headers; the loopback proxy always works.
+    // When the renderer flagged a decode failure (forceYtDlp=1) the proxy URL would
+    // just fail again, so re-encode the resolved stream into a local MP3 and hand
+    // back a guaranteed-playable file instead.
+    if force_yt_dlp {
+        let input = stream_url.clone();
+        let tid = resolved_id.clone();
+        let res = tokio::task::spawn_blocking(move || {
+            transcode_to_cache_sync(&tid, &input)
+        })
+        .await;
+        if let Ok(Some(_)) = res {
+            let port2 = state.server_port;
+            return json_ok(json!({
+                "success": true,
+                "isLocal": true,
+                "mimeType": "audio/mpeg",
+                "streamUrl": format!("http://127.0.0.1:{port2}/api/local-track?id={resolved_id}"),
+                "resolvedId": resolved_id,
+                "duration": duration,
+                "title": info.get("title").and_then(|v| v.as_str()).unwrap_or(&title),
+                "artist": info.get("uploader").and_then(|v| v.as_str()).unwrap_or(&artist),
+                "thumbnail": thumbnail.clone(),
+                "direct": true,
+            }));
+        }
+        util::log_line("WARN", "forceYtDlp transcode failed; falling back to proxied stream");
+    }
     let port = state.server_port;
     let proxied = format!(
         "http://127.0.0.1:{port}/api/audio-proxy?url={}",
@@ -514,6 +988,8 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         "direct": true,
     });
     // Background cache so the next play is offline-grade fast (upstream parity).
+    // Anything that is not MP3 is re-encoded during the copy; the tracks folder
+    // only ever holds MP3 and this keeps stale m4a/webm caches from piling up.
     {
         let dl_url = stream_url.clone();
         let dl_id = resolved_id.clone();

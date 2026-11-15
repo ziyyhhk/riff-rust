@@ -28,14 +28,33 @@ pub fn save_library(tracks: &[Value]) {
     let _ = util::write_json_file(&util::library_path(), &json!({ "tracks": tracks }));
 }
 
+/// Extensions Media Foundation decodes reliably on this machine; everything else
+/// (.m4a/.aac/.webm/.ogg) risks MEDIA_ERR_SRC_NOT_SUPPORTED (code=4) in WebView2.
+const PLAYABLE_EXT: [&str; 3] = ["mp3", "wav", "flac"];
+
 pub fn find_track_by_id(id: &str) -> Option<PathBuf> {
     let clean = id.trim();
     if !safe_id(clean) {
         return None;
     }
-    // `local_<hash>` / `riff-<hash>` ids map to `library/<id>.<ext>`.
-    // Probe the known extensions directly instead of read_dir()-ing the whole library
-    // on every range request (audio players issue a lot of them while seeking).
+    // Prefer decodeable files everywhere: local MP3/WAV/FLAC imports, then the
+    // tracks/ cache in MP3 (older caches hold .m4a/.webm which this WebView
+    // cannot decode; transcoded cache files land next to them as .mp3).
+    if clean.starts_with("local_") || clean.starts_with("riff-") {
+        for ext in PLAYABLE_EXT {
+            let path = util::library_dir().join(format!("{clean}.{ext}"));
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+    }
+    for ext in PLAYABLE_EXT {
+        let path = util::cache_dir().join(format!("{clean}.{ext}"));
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    // Fall back to the raw files whatever extension they carry.
     if clean.starts_with("local_") || clean.starts_with("riff-") {
         for ext in AUDIO_EXT {
             let path = util::library_dir().join(format!("{clean}.{ext}"));
@@ -44,9 +63,6 @@ pub fn find_track_by_id(id: &str) -> Option<PathBuf> {
             }
         }
     }
-    // yt-dlp download cache uses the bare video id: `tracks/<id>.<ext>`.
-    // This also used to be gated behind the local_/riff- prefix, so downloaded
-    // songs were re-resolved over the network every time they played.
     for ext in AUDIO_EXT {
         let path = util::cache_dir().join(format!("{clean}.{ext}"));
         if path.is_file() {
@@ -58,6 +74,37 @@ pub fn find_track_by_id(id: &str) -> Option<PathBuf> {
 
 pub fn find_cached_by_id(id: &str) -> Option<PathBuf> {
     find_track_by_id(id)
+}
+
+/// Probe only `tracks/<id>.<ext>` for an extension that plays back on this machine.
+/// Local imports (library/) are handled by `find_track_by_id`.
+pub fn find_playable_cached_by_id(id: &str) -> Option<PathBuf> {
+    let clean = id.trim();
+    if !safe_id(clean) {
+        return None;
+    }
+    for ext in PLAYABLE_EXT {
+        let path = util::cache_dir().join(format!("{clean}.{ext}"));
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Any cached stream file, including non-playable ones (m4a/webm/aac/mp4).
+pub fn find_any_cached_by_id(id: &str) -> Option<PathBuf> {
+    let clean = id.trim();
+    if !safe_id(clean) {
+        return None;
+    }
+    for ext in AUDIO_EXT {
+        let path = util::cache_dir().join(format!("{clean}.{ext}"));
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    None
 }
 
 /// Copy audio files into the library dir and return display-ready items

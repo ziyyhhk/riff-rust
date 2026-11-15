@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="banner.png?v=2" alt="Riff Rust - desktop music player and audio suite for YouTube Music, SoundCloud, and local files" width="100%">
+  <img src="banner.png?v=2" alt="Riff Rust, a desktop music player and audio suite for YouTube Music, SoundCloud, and local files" width="100%">
 </p>
 
 <p align="center">
@@ -15,8 +15,8 @@
 </h1>
 
 > **Riff Rust** is a from-scratch [Rust + Tauri](https://tauri.app) rebuild of [Riff](https://github.com/rootscripts/riff) (Electron + vanilla JS, MIT).
-> Same UI, rebuilt backend: a native WebView instead of bundled Chromium, and a Rust HTTP API on localhost instead of a Node server — aiming for far lower RAM and CPU use.
-> It is **not** affiliated with the upstream Riff team; it's a community rebuild. Feature parity is a work in progress — see [PORTING.md](PORTING.md) for the exact status of every feature.
+> Same UI, rebuilt backend: a native WebView instead of bundled Chromium, and a Rust HTTP API on localhost instead of a Node server, aiming for far lower RAM and CPU use.
+> It is **not** affiliated with the upstream Riff team; it's a community rebuild. Feature parity is a work in progress, see [PORTING.md](PORTING.md) for the exact status of every feature.
 > Original Riff copyright belongs to its authors; this fork remains MIT-licensed (see [LICENSE](LICENSE)).
 
 
@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/rootscripts/riff/releases">
+  <a href="https://github.com/ziyyhhk/riff-rust/releases">
     <img src="https://img.shields.io/badge/Download-6750A4?style=for-the-badge&logo=download&logoColor=white" height="40" alt="Download">
   </a>
   &nbsp;
@@ -45,9 +45,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/rootscripts/riff/stargazers"><img src="https://img.shields.io/github/stars/rootscripts/riff?style=flat-square&labelColor=16191C&color=CAD3F5" alt="Stars"></a>
-  <a href="https://github.com/rootscripts/riff/commits/main"><img src="https://img.shields.io/github/last-commit/rootscripts/riff?style=flat-square&labelColor=16191C&color=94C9FF" alt="Last Commit"></a>
-  <a href="https://github.com/rootscripts/riff/blob/main/LICENSE"><img src="https://img.shields.io/github/license/rootscripts/riff?style=flat-square&labelColor=16191C&color=8EEDD8" alt="License"></a>
+  <a href="https://github.com/ziyyhhk/riff-rust/stargazers"><img src="https://img.shields.io/github/stars/ziyyhhk/riff-rust?style=flat-square&labelColor=16191C&color=CAD3F5" alt="Stars"></a>
+  <a href="https://github.com/ziyyhhk/riff-rust/commits/main"><img src="https://img.shields.io/github/last-commit/ziyyhhk/riff-rust?style=flat-square&labelColor=16191C&color=94C9FF" alt="Last Commit"></a>
+  <a href="https://github.com/ziyyhhk/riff-rust/blob/main/LICENSE"><img src="https://img.shields.io/github/license/ziyyhhk/riff-rust?style=flat-square&labelColor=16191C&color=8EEDD8" alt="License"></a>
   <a href="https://ko-fi.com/rootlesszen"><img src="https://img.shields.io/badge/Ko--fi-support-FF5E5B?style=flat-square&logo=kofi&logoColor=white&labelColor=16191C" alt="Support on Ko-fi"></a>
 </p>
 
@@ -68,69 +68,69 @@ Built with **Electron**, **Vanilla JavaScript**, and **WebGL**, Riff provides re
 
 ## Features
 
-- High quality streaming with **YouTube Music, YouTube, and SoundCloud** without third-party advertisements or account requirements
-- **Offline lossless playback with full local library support** for high resolution formats including FLAC, WAV, MP3, OGG, and M4A.
-- **Easy built-in audio editor**, downloading with effects or trimming 10-band & 3-band equalizer, and real-time DSP effects (speed, pitch, reverb, distortion).
-- **1-Click multi-platform playlist migration**: Direct import and resolution of public playlists from Spotify, Apple Music, Deezer, YouTube Music, and SoundCloud
-- **Material Design 3 UI**: Dynamic color extraction from album artwork, deep UI theming, responsive layout presets, and an integrated CSS editor
-- **Hardware-Accelerated Visuals**: Canvas and WebGL visualizers including real-time frequency analyzers, an interactive squiggly progress scrubber, and synchronized karaoke lyrics.
-- **Discord Rich Presence**: Real-time playback status reporting track metadata, artist info, and elapsed time to Discord.
-- **Zero Telemetry**: No tracking identifiers, analytics pings, or background data collection.
-- **Fullscreen mode** with fancy lyrics animation.
-- **Albums** - see all of your favorite artist albums.
-- **Customization** - built in theme editor, configure everything, and a CSS editor, with animated backgrounds and interface opacity sliders.
-- **Plugins** - built-in plugin feature where you can add a plugin to edit how Riff works with something or add a new function.
+* High quality streaming with **YouTube Music, YouTube, and SoundCloud** without third-party advertisements or account requirements
+* **Offline lossless playback with full local library support** for high resolution formats including FLAC, WAV, MP3, OGG, and M4A.
+* **Easy built-in audio editor**, downloading with effects or trimming 10-band & 3-band equalizer, and real-time DSP effects (speed, pitch, reverb, distortion).
+* **1-Click multi-platform playlist migration**: Direct import and resolution of public playlists from Spotify, Apple Music, Deezer, YouTube Music, and SoundCloud
+* **Material Design 3 UI**: Dynamic color extraction from album artwork, deep UI theming, responsive layout presets, and an integrated CSS editor
+* **Hardware-Accelerated Visuals**: Canvas and WebGL visualizers including real-time frequency analyzers, an interactive squiggly progress scrubber, and synchronized karaoke lyrics.
+* **Discord Rich Presence**: Real-time playback status reporting track metadata, artist info, and elapsed time to Discord.
+* **Zero Telemetry**: No tracking identifiers, analytics pings, or background data collection.
+* **Fullscreen mode** with fancy lyrics animation.
+* **Albums**: see all of your favorite artist albums.
+* **Customization**: built in theme editor, configure everything, and a CSS editor, with animated backgrounds and interface opacity sliders.
+* **Plugins**: built-in plugin feature where you can add a plugin to edit how Riff works with something or add a new function.
 ## Built-in Audio Suite
 
 Riff includes an integrated audio engineering toolkit accessible directly within the player interface:
 
 ### Visual Audio Editor
-- **Lossless Audio Trimming**: Define start and end boundaries to trim tracks without transcoding loss.
-- **Region Extraction**: Select and isolate specific audio segments to save as standalone files.
-- **Non-Destructive Processing**: Edit operations produce independent files while preserving original source media untouched.
+* **Lossless Audio Trimming**: Define start and end boundaries to trim tracks without transcoding loss.
+* **Region Extraction**: Select and isolate specific audio segments to save as standalone files.
+* **Non-Destructive Processing**: Edit operations produce independent files while preserving original source media untouched.
 
 ### 10-Band Parametric Equalizer
-- Dedicated frequency sliders covering 32 Hz through 16 kHz with pre-configured acoustic profiles (Bass Boost, Vocal Clarity, Electronic, Flat, Rock).
-- Per-channel gain adjustments with real-time Web Audio API signal processing.
+* Dedicated frequency sliders covering 32 Hz through 16 kHz with pre-configured acoustic profiles (Bass Boost, Vocal Clarity, Electronic, Flat, Rock).
+* Per-channel gain adjustments with real-time Web Audio API signal processing.
 
 ### Real-Time DSP Effects Chain
-- **Tempo Control**: Dynamically speed up or slow down playback rate without altering pitch.
-- **Pitch Shifting**: Independent semitone pitch adjustment for rehearsal and tuning.
-- **Reverb & Spatial Effects**: Algorithmic convolution and room size simulation for spatial enhancement.
-- **Distortion / Overdrive**: Adjustable wave-shaping saturation and drive harmonics.
+* **Tempo Control**: Dynamically speed up or slow down playback rate without altering pitch.
+* **Pitch Shifting**: Independent semitone pitch adjustment for rehearsal and tuning.
+* **Reverb & Spatial Effects**: Algorithmic convolution and room size simulation for spatial enhancement.
+* **Distortion / Overdrive**: Adjustable wave-shaping saturation and drive harmonics.
 
 ### Offline Library & Download Pipeline
-- Download streams from YouTube Music, YouTube, and SoundCloud directly into local disk storage (MP3, FLAC, Opus, WAV).
-- Automatic ID3 and metadata tagging, including high-resolution cover art embedding.
-- Complete offline availability with full playlist compilation and search indexing.
+* Download streams from YouTube Music, YouTube, and SoundCloud directly into local disk storage (MP3, FLAC, Opus, WAV).
+* Automatic ID3 and metadata tagging, including high-resolution cover art embedding.
+* Complete offline availability with full playlist compilation and search indexing.
 
 ## Material Design 3 Expressive UI
 
 Riff implements the Material Design 3 (M3 Expressive) specification:
 
-- **Dynamic Color Extraction**: Generates responsive UI tonal palettes on the fly based on the dominant and secondary hues of active album art.
-- **Deep UI Customization**: Configurable banner backdrops, mesh gradients, blur filters, and typography controls.
-- **Integrated CSS Editor**: Built-in developer console allowing direct CSS overrides and custom style injection to personalize every aspect of the interface.
-- **Optimized Layout Modes**: Compact mini-player layout, expanded desktop view, and fullscreen TV / Karaoke mode with synchronized lyrics rendering.
+* **Dynamic Color Extraction**: Generates responsive UI tonal palettes on the fly based on the dominant and secondary hues of active album art.
+* **Deep UI Customization**: Configurable banner backdrops, mesh gradients, blur filters, and typography controls.
+* **Integrated CSS Editor**: Built-in developer console allowing direct CSS overrides and custom style injection to personalize every aspect of the interface.
+* **Optimized Layout Modes**: Compact mini-player layout, expanded desktop view, and fullscreen TV / Karaoke mode with synchronized lyrics rendering.
 
 ## Multi-Platform Playlist Migration
 
 Migrate existing music libraries between platforms in a single operation:
 
-- Import public playlist URLs from **Spotify** (including playlists with 100+ tracks via automated pagination).
-- Import public playlists from **Deezer**, and public playlists and albums from **Apple Music**, **SoundCloud**, and **YouTube / YouTube Music**.
-- Platform-aware search resolution: matches imported track metadata against the selected audio provider to construct immediate local playlists.
+* Import public playlist URLs from **Spotify** (including playlists with 100+ tracks via automated pagination).
+* Import public playlists from **Deezer**, and public playlists and albums from **Apple Music**, **SoundCloud**, and **YouTube / YouTube Music**.
+* Platform-aware search resolution: matches imported track metadata against the selected audio provider to construct immediate local playlists.
 
 ## Synchronized Lyrics Engine
 
-- Automatic multi-provider lyrics lookup matching artist and title metadata.
-- Native support for synchronized LRC files, plain text lyrics, and dynamic online timestamp alignment.
-- Inline time-offset adjustments to manually synchronize lyrics with live streams.
-- Multi-language translation support directly inside the lyrics panel.
+* Automatic multi-provider lyrics lookup matching artist and title metadata.
+* Native support for synchronized LRC files, plain text lyrics, and dynamic online timestamp alignment.
+* Inline time-offset adjustments to manually synchronize lyrics with live streams.
+* Multi-language translation support directly inside the lyrics panel.
 
 ## Download and install
 
-Pre-built binaries are available on the [Releases page](https://github.com/rootscripts/riff/releases).
+Pre-built binaries are available on the [Releases page](https://github.com/ziyyhhk/riff-rust/releases).
 
 Standard releases include all necessary dependencies (bundled yt-dlp and ffmpeg binaries). No secondary runtime configuration is required on Windows or Linux.
 
@@ -141,8 +141,8 @@ On Windows, the installer lets you choose the installation directory. Uninstalli
 macOS support is currently experimental and compiled via continuous integration.
 
 1. Download the appropriate image:
-   - `Riff-<version>-mac-arm64.dmg` for Apple Silicon (M1 / M2 / M3 / M4)
-   - `Riff-<version>-mac-x64.dmg` for Intel-based hardware
+   * `Riff-<version>-mac-arm64.dmg` for Apple Silicon (M1 / M2 / M3 / M4)
+   * `Riff-<version>-mac-x64.dmg` for Intel-based hardware
 2. Open the disk image and drag Riff to your `Applications` directory.
 3. Riff is ad-hoc signed but not notarized, so the first launch is blocked. Right-click `Riff.app` in `Applications`, select **Open**, and confirm the prompt. On macOS 15 and later, open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
 4. If macOS still flags the bundle as damaged (older releases), execute the following command in Terminal:
@@ -170,7 +170,7 @@ git clone <this-repo>
 cd riff-rust
 npm install
 npm run assemble   # flatten src/renderer + assets + vendor into web/
-npm run build      # cargo tauri build -> NSIS .exe installer in src-tauri/target/release/bundle/nsis/
+npm run build      # cargo tauri build to NSIS .exe installer in src-tauri/target/release/bundle/nsis/
 ```
 
 Runtime needs `yt-dlp` and `ffmpeg` (both auto-download on first run from the official releases, SHA-256 verified; ~200 MB total). Streaming works without ffmpeg.
@@ -179,7 +179,7 @@ The exact build output depends on the current project configuration.
 
 ## Memory usage
 
-Upstream Riff (Electron) typically uses ~180 MB steady-state and only counts as a leak above 600 MB. Riff Rust ships no bundled Chromium; it uses the OS WebView2 instead. A measured whole-process tree (`riff-rust.exe` + all `msedgewebview2.exe` children) idling at the home screen used ~310 MB private bytes and ~517 MB working set on one Windows machine — roughly the same order as Electron; the clear win is disk (5 MB installer vs ~200 MB). No side-by-side numbers against upstream on the same playback scenario have been published yet; use `npm run measure` yourself.
+Upstream Riff (Electron) typically uses ~180 MB steady-state and only counts as a leak above 600 MB. Riff Rust ships no bundled Chromium; it uses the OS WebView2 instead. A measured whole-process tree (`riff-rust.exe` + all `msedgewebview2.exe` children) idling at the home screen used ~310 MB private bytes and ~517 MB working set on one Windows machine, roughly the same order as Electron; the clear win is disk (5 MB installer vs ~200 MB). No side-by-side numbers against upstream on the same playback scenario have been published yet; use `npm run measure` yourself.
 
 ## Mobile versions
 
@@ -235,6 +235,5 @@ Riff is developed for educational purposes and personal media management. Users 
 
 [MIT](LICENSE)
 
----
-
+***
 <sub>Keywords: free music player, YouTube Music desktop app, SoundCloud desktop player, ad-free music player, Material Design 3, M3 Expressive, visual audio editor, lossless audio trimmer, 10-band equalizer, DSP effects, tempo changer, pitch shift, FLAC player, WAV playback, Spotify playlist import, Apple Music playlist migration, Electron music player, Vanilla JS, WebGL audio visualizer, Discord Rich Presence, open source music player, MIT license, telemetry-free desktop player.</sub>

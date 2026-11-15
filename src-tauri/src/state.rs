@@ -87,6 +87,8 @@ pub struct AppState {
     pub lyrics_cache: Mutex<HashMap<String, (Instant, Value)>>,
     /// Word-level (NetEase yrc) lyric responses (6h pos / 10min neg).
     pub lyrics_words_cache: Mutex<HashMap<String, (Instant, Value)>>,
+    /// Scraped SoundCloud `client_id` (12h TTL), shared by search and resolve.
+    pub soundcloud_client_id: Mutex<Option<(String, Instant)>>,
 }
 
 impl AppState {
@@ -114,6 +116,7 @@ impl AppState {
             discord: Arc::new(crate::discord_rpc::DiscordRpc::new()),
             lyrics_cache: Mutex::new(HashMap::new()),
             lyrics_words_cache: Mutex::new(HashMap::new()),
+            soundcloud_client_id: Mutex::new(None),
         }
     }
 

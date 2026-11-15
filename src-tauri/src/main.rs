@@ -10,6 +10,7 @@ mod server;
 mod state;
 mod tools;
 mod util;
+mod soundcloud;
 mod ytm;
 
 use std::sync::Arc;

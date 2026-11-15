@@ -1,4 +1,4 @@
-﻿# Riff Rust â€” porting status
+# Riff Rust — porting status
 
 Riff Rust is a from-scratch Rust/Tauri rebuild of [Riff](https://github.com/rootscripts/riff)
 (Electron + vanilla JS, MIT). The UI is the original `src/renderer` (HTML/CSS/JS, ~same code),
@@ -7,79 +7,84 @@ The Electron main process and Node server were replaced with Rust.
 
 ## Status legend
 
-- âœ… Ported and working
-- ðŸŸ¡ Behaviour differs or is partial
-- âŒ Not yet ported (returns an honest error/empty state; UI must not crash)
+- ✅ Ported and working
+- 🟡 Behaviour differs or is partial
+- ❌ Not yet ported (returns an honest error/empty state; UI must not crash)
 
 ## Architecture
 
 | Piece | Riff (upstream) | Riff Rust |
 |---|---|---|
-| UI runtime | Electron (Chromium) | Tauri v2 â†’ WebView2 / WKWebView / WebKitGTK |
+| UI runtime | Electron (Chromium) | Tauri v2 → WebView2 / WKWebView / WebKitGTK |
 | Backend | `src/server/server.js` (Node http) | embedded Rust server (axum) on `127.0.0.1:<random port>` |
-| Main process | `src/main/main.js` (Electron IPC) | Tauri commands (`window.electronAPI` shim â†’ `invoke()`) |
-| Audio DSP / EQ / visualizers | Web Audio API + WebGL (renderer) | **unchanged** â€” runs in the webview |
+| Main process | `src/main/main.js` (Electron IPC) | Tauri commands (`window.electronAPI` shim → `invoke()`) |
+| Audio DSP / EQ / visualizers | Web Audio API + WebGL (renderer) | **unchanged** — runs in the webview |
 | Data dir | `%LOCALAPPDATA%\Riff` | `%LOCALAPPDATA%\Riff Rust` |
 
-## What works today (v0.1.2)
+## What works today (v0.1.8)
 
-- âœ… Same UI (styles.css, index.html, app.js, themes, assets)
-- âœ… First-run onboarding wizard â€” identical flow to upstream (language â†’ look â†’ make it yours â†’ launcher â†’ connect), shown only when `.rifftutorial` is absent (same existence-only marker as upstream)
-- âœ… "Start Menu shortcut" launcher integration on Windows (creates a real `.lnk`)
-- âœ… Frameless window, tray icon (Show / Quit), close-to-tray
-- âœ… Local library: import audio files (file dialog â†’ copied to library dir),
+- ✅ Same UI (styles.css, index.html, app.js, themes, assets)
+- ✅ First-run onboarding wizard — identical flow to upstream (language → look → make it yours → launcher → connect), shown only when `.rifftutorial` is absent (same existence-only marker as upstream)
+- ✅ "Start Menu shortcut" launcher integration on Windows (creates a real `.lnk`)
+- ✅ Frameless window, tray icon (Show / Quit), close-to-tray
+- ✅ Local library: import audio files (file dialog → copied to library dir),
   tags read with `lofty` (title/artist/album/duration/cover), list/remove/update,
   HTTP Range streaming with seeking (`/api/local-track`, `/api/library-file`).
   Ranges are streamed from disk in 64 KiB chunks; the whole track is never buffered in RAM.
-- âœ… YouTube Music **search** through the inner API (`src-tauri/src/ytm.rs`) with a
-  5-minute cache â€” no Python process per search. Falls back to yt-dlp if the API changes.
-- âœ… SoundCloud **search** via yt-dlp (`scsearch`)
-- âœ… Stream resolution via yt-dlp (`/api/stream-info`) with a 10-minute resolved-URL cache
+- ✅ YouTube Music **search** through the inner API (`src-tauri/src/ytm.rs`) with a
+  5-minute cache — no Python process per search. Falls back to yt-dlp if the API changes.
+- ✅ SoundCloud **search and stream resolution** through the direct SoundCloud API
+  (`src-tauri/src/soundcloud.rs`): credentials scraped from the JS bundles on the front
+  page (cached 12 h), `/search/tracks` for search (~1 s), `/resolve` for progressive
+  MP3 stream URLs. Falls back to yt-dlp if SoundCloud changes anything.
+- ✅ Stream resolution via yt-dlp (`/api/stream-info`) with a 10-minute resolved-URL cache
   and a downloaded-file short circuit; yt-dlp runs on a blocking worker and is killed on timeout
-- âœ… Downloads via yt-dlp + ffmpeg (`/api/download`, mp3/flac/opus/wav)
-- âœ… Tools auto-install (`src-tauri/src/tools.rs`): upstream's `ensureTools` ported to Rust â€”
+- ✅ Downloads via yt-dlp + ffmpeg (`/api/download`, mp3/flac/opus/wav)
+- ✅ Tools auto-install (`src-tauri/src/tools.rs`): upstream's `ensureTools` ported to Rust —
   yt-dlp and ffmpeg are fetched from the same release URLs on boot or via `/api/tools/install`,
-  SHA-256 verified against the published SUMS, extracted (PowerShell â†’ Expand-Archive â†’ tar.exe),
+  SHA-256 verified against the published SUMS, extracted (PowerShell → Expand-Archive → tar.exe),
   with download progress polled by the required-tools modal (`/api/tools/status`). winget fallback
   (Gyan.FFmpeg / yt-dlp.yt-dlp) when the direct download fails. No more endless "downloading tools".
-- âœ… Lyrics via LRCLIB + custom `.lrc` lyrics (`/api/lyrics`). Now also: cached 24 h, `[offset:]`
-  LRC tags honoured (upstream drops them â€” the classic "lyrics run behind the vocals" bug),
+- ✅ Lyrics via LRCLIB + custom `.lrc` lyrics (`/api/lyrics`). Now also: cached 24 h, `[offset:]`
+  LRC tags honoured (upstream drops them — the classic "lyrics run behind the vocals" bug),
   and `/api/lyrics-words` wired to NetEase enhanced-LRC for word-level karaoke.
-- âœ… Spotify playlist import (anonymous embed-token pathfinder flow, same as upstream; `/api/spotify-import` + `/api/playlist-import` for YouTube/SoundCloud playlists via yt-dlp)
-- âœ… Offline library listing/deletion (`/api/offline-library`, `/api/offline-delete`, `/api/clear-offline-library`),
+- ✅ Spotify playlist import (anonymous embed-token pathfinder flow, same as upstream; `/api/spotify-import` + `/api/playlist-import` for YouTube/SoundCloud playlists via yt-dlp)
+- ✅ Offline library listing/deletion (`/api/offline-library`, `/api/offline-delete`, `/api/clear-offline-library`),
   with exact-id matching so deleting one track cannot remove another with the same prefix
-- âœ… Image proxy + audio proxy with Range forwarding (`/api/image-proxy`, `/api/audio-proxy`)
-- âœ… Local thumbnail serving, cache size/clear, data-dir & download-dir management,
+- ✅ Image proxy + audio proxy with Range forwarding (`/api/image-proxy`, `/api/audio-proxy`)
+- ✅ Local thumbnail serving, cache size/clear, data-dir & download-dir management,
   storage persistence (`storage.json`), playlists export (`playlists.json`)
-- âœ… Themes/plugins import & enable state (`.css` / `.js` drop-ins)
-- âœ… Diagnostics, logs (`logs/riff-rust.log`) with 4 MB rotation (3 old files kept)
-- âœ… Media keys (play/pause, next, previous, stop) and the app's global shortcuts
+- ✅ Themes/plugins import & enable state (`.css` / `.js` drop-ins)
+- ✅ Diagnostics, logs (`logs/riff-rust.log`) with 4 MB rotation (3 old files kept)
+- ✅ Media keys (play/pause, next, previous, stop) and the app's global shortcuts
   (`Ctrl+Shift+Space/Left/Right/Up/Down`) through `tauri-plugin-global-shortcut`.
   Media keys are only grabbed after the renderer reports its audio graph is ready, matching upstream.
-- âœ… Mini-player: toggles to a 380Ã—160 always-on-top window, remembers geometry, restores on exit.
+- ✅ Mini-player: toggles to a 380×160 always-on-top window, remembers geometry, restores on exit.
   Mini lyrics expand/collapse the window and stay on-screen.
-- âœ… Window startup/geometry matches upstream Electron: 82%Ã—86% of the primary **work area**
+- ✅ Window startup/geometry matches upstream Electron: 82%×86% of the primary **work area**
   (taskbar excluded) at 9%/7% offsets, saved `window-state.json` (`bounds`/`isMaximized`/
   `isFullScreen`) restored onto the matching display, hidden until the page loads, geometry
   persisted on resize/move/maximize/fullscreen/close (400 ms throttled).
-- âœ… Window visibility events (`window-visibility`) on minimize/restore/hide/show, so the renderer
+- ✅ Window visibility events (`window-visibility`) on minimize/restore/hide/show, so the renderer
   can pause visualizers/background video while hidden.
-- âœ… Shared pooled HTTP client (connection reuse, gzip) and bounded TTL caches for search/stream URLs
-- ✅ Direct inner-API audio resolution (v0.1.7 src-tauri/src/ytm_player.rs): /api/stream-info tries YouTube /youtubei/v1/player first (IOS + ANDROID_MUSIC, visitorData hot-swap) before falling back to yt-dlp; cold track resolves run 0.3-1.5s vs ~8s before. Also "Riff Library" hybrid search (platform=rifflibrary): single ranked list combining YouTube Music + SoundCloud interleaved 2:1; /api/stream-info returns streamUrl/proxyUrl upstream shape, audio plays through loopback /api/audio-proxy, and resolved streams cached to tracks/ in the background for repeat plays.
-- âœ… Discovery/recommendations (`src-tauri/src/discovery.rs`): country charts (`/api/top-chart`,
+- ✅ Shared pooled HTTP client (connection reuse, gzip) and bounded TTL caches for search/stream URLs
+- ✅ Direct inner-API audio resolution (v0.1.7 src-tauri/src/ytm_player.rs): /api/stream-info tries YouTube /youtubei/v1/player first (IOS + ANDROID_MUSIC, visitorData hot-swap) before falling back to yt-dlp; cold track resolves run 0.3-1.5s vs ~8s before. Also "Riff Library" hybrid search (platform=rifflibrary): single ranked list combining YouTube Music + SoundCloud interleaved 2:1; /api/stream-info returns streamUrl/proxyUrl upstream shape, audio plays through loopback /api/audio-proxy.
+- ✅ MP3-first caching (v0.1.8): the background cache now downloads or **re-encodes** every stream to `tracks/<id>.mp3` (mp3 CDN links are stored byte-for-byte, everything else goes through ffmpeg). Unplayable cache files (.m4a/.webm) already on disk are transcoded to mp3 on the next play and then deleted. MP3/WAV/FLAC are probed before anything else everywhere, so repeat plays are local-file instant and survive machines without AAC/Opus decoders (this Windows build cannot decode YouTube's streams at all; WebView2 reports code=4).
+- ✅ Renderer decode-failure recovery (v0.1.8): the renderer's automatic second retry carries `forceYtDlp=1`, which Riff Rust now honours: /api/stream-info resolves with the inner API, transcodes to a local MP3 in a blocking task, and returns a `/api/local-track` URL. The player gets a file it can decode on the first retry, with no user action. Falls back to the old yt-dlp-then-proxy flow only if ffmpeg or the resolver fails.
+- ✅ Discovery/recommendations (`src-tauri/src/discovery.rs`): country charts (`/api/top-chart`,
   YouTube Charts playlist browse via YTM inner API + iTunes RSS + Last.fm fallback), `/api/vibe`
   (seeded by YTM RDAMVM mixes + Deezer related artists, 20-minute cache), `/api/trending`
   (Deezer scene charts + YTM search, 30-minute cache), `/api/hot` (global Deezer chart resolved
   through YTM), `/api/artist` (Deezer top tracks/albums/fans + Last.fm bio & monthly listeners).
   The home page now fills like upstream: For You / Trending / Top chart.
 - ✅ Discord Rich Presence: IPC named pipe discord-ipc-{0..9}, READY handshake, SET_ACTIVITY with track title/artist/duration/thumbnail/Listen button, PING-PONG, 15s reconnect.
-- ðŸŸ¡ Plugin execution: listable/toggleable, but sandboxed runner not built
-- ðŸŸ¡ Proxy config: stored and applied to yt-dlp + server-side fetches; no per-route test UI wiring
+- 🟡 Plugin execution: listable/toggleable, but sandboxed runner not built
+- 🟡 Proxy config: stored and applied to yt-dlp + server-side fetches; no per-route test UI wiring
 
-## Not yet ported âŒ (returns `{ success: false, "error": "not yet ported" }`)
+## Not yet ported ❌ (returns `{ success: false, "error": "not yet ported" }`)
 
 - Google / YouTube account sign-in & library import (OAuth PKCE flow, account encryption)
-- Spotify integration (auth, personal library) â€” but **public playlist import works**
+- Spotify integration (auth, personal library) — but **public playlist import works**
 - Apple Music, Deezer, Yandex, TikTok, VK playlist import
 - Last.fm (scrobbling, token flow; only used anonymously for artist bio/listeners)
 - i18n/translation batch API, karaoke word-level lyrics (`/api/lyrics-words`)
@@ -90,7 +95,7 @@ The Electron main process and Node server were replaced with Rust.
 
 ## Why it should use less RAM/CPU
 
-Upstream ships a whole Chromium per window (~180â€“600 MB). Riff Rust ships only the native
+Upstream ships a whole Chromium per window (~180–600 MB). Riff Rust ships only the native
 webview plus a small Rust backend; the heavy parts upstream already did in the renderer
 (Web Audio EQ/DSP, WebGL visualizers) still run there, but there is no extra browser process,
 no V8/Node backend, and the audio DSP path is identical.
@@ -100,7 +105,7 @@ Backend-specific wins over the first Rust build (v0.1.1):
 - Local playback streams ranges from disk instead of reading a whole track into memory per
   request (a 60 MB FLAC no longer costs 60 MB RAM on every seek).
 - One pooled `reqwest::Client` instead of a new client/TLS handshake per request.
-- Search runs through the Rust YTM inner API by default (~300â€“1500 ms, bound by YouTube's
+- Search runs through the Rust YTM inner API by default (~300–1500 ms, bound by YouTube's
   servers) instead of spawning `yt-dlp`/Python per query; resolved stream URLs are cached for
   10 minutes.
 - Embedded API client timeout is 8 s (connect 6 s): a stalling YouTube degrades in seconds
@@ -108,6 +113,8 @@ Backend-specific wins over the first Rust build (v0.1.1):
 - yt-dlp resolution uses `--socket-timeout 8 --retries 1`: bad networks fail fast; the
   localhost audio proxy remains a true streaming proxy (bytes forwarded, nothing buffered).
 - yt-dlp children are killed on timeout instead of being left running.
+- Streams are now cached as MP3 (re-encoded on the way in), so repeat plays never touch the
+  network or the decode-fragile path; this machine decodes MP3/WAV/FLAC only.
 - Logs rotate at 4 MB; `cacheLimitMB` in `config.json` optionally trims `tracks/` at startup.
 - Minimized windows now tell the renderer, letting it stop visualizer/background work.
 
@@ -140,6 +147,16 @@ and Riff Rust before publishing a RAM/CPU figure.
   search working, just slower.
 - Local library IDs match upstream (`local_<sha1(name+size)>`), so a data migration of local
   files is straightforward, but the Riff Rust data dir is separate from Riff's.
+- This machine's WebView2 build cannot decode AAC (m4a/mp4) or WebM Opus at all, while
+  Electron-shipped Chromium decodes them natively. YouTube streams are AAC/Opus, so on this
+  machine the first play of a track is an automatic transcode (one silent retry, then local
+  MP3) instead of instant stream matching. On machines with working Media Foundation codecs
+  the same build behaves as before (direct stream first, transcode in the background).
+- Local imports of AAC/M4A files are still copied into the library as-is and play only where
+  the webview can decode them; import as MP3/WAV/FLAC for this machine.
+- SoundCloud direct-resolution URLs (preview transcodings) are short-lived and MP3-only;
+  gated tracks keep returning yt-dlp errors exactly like upstream, and SoundCloud HLS-only
+  tracks fall back to yt-dlp instead of the direct path.
 
 ## Build
 
