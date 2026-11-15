@@ -7345,7 +7345,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           const sData = await sRes.json();
           const hit = sData && Array.isArray(sData.tracks) && sData.tracks[0];
           if (hit && hit.id && /^[a-zA-Z0-9_-]{11}$/.test(hit.id) && !isStaticTikTokTrack(nextTrack)) {
-            nextTrack.id = hit.id;
+            // Keep the row's identity intact: overwriting `id` here made the UI
+            // show one song while a search hit (sometimes a cover) was queued.
+            nextTrack.resolvedYtId = hit.id;
             nextTrack.url = hit.url || `https://www.youtube.com/watch?v=${hit.id}`;
             if (!nextTrack.thumbnail && hit.thumbnail) nextTrack.thumbnail = hit.thumbnail;
           }
@@ -7789,7 +7791,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           state.isPlaying = false;
           updatePlayPauseButton(false, false);
           if (el.trackLoadingOverlay) el.trackLoadingOverlay.classList.add('hidden');
-          showToast('Could not load audio stream', 'error');
+          showToast('Audio stream unavailable', 'error');
         };
         el.nativeAudio.addEventListener('error', onNativeAudioErrorOnce, { once: true });
         if (preloadedUrl.includes('.m3u8') && window.Hls && Hls.isSupported()) {
@@ -7896,7 +7898,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         state.isPlaying = false;
         updatePlayPauseButton(false, false);
         if (el.trackLoadingOverlay) el.trackLoadingOverlay.classList.add('hidden');
-        showToast('Could not load audio stream', 'error');
+        showToast('Audio stream unavailable', 'error');
       };
       el.nativeAudio.addEventListener('error', onNativeAudioErrorOnce, { once: true });
 
@@ -7927,11 +7929,23 @@ document.addEventListener('DOMContentLoaded', async () => {
       state.isLoadingTrack = false;
       if (err.name === 'AbortError' && !didTimeoutAbort) return;
       if (currentToken === state.loadToken) {
+        const retryable = didTimeoutAbort || err.name === 'TypeError' || /timeout|network|failed to fetch/i.test(err.message || '');
+        if (retryable && track && (track._retryCount || 0) < 2) {
+          state.isLoadingTrack = true;
+          if (el.trackLoadingOverlay) el.trackLoadingOverlay.classList.remove('hidden');
+          // A transient DNS/signature hiccup should not surface as "track can't
+          // be loaded". Let the recovery path retry once before giving up.
+          setTimeout(() => {
+            if (currentToken === state.loadToken) recoverCurrentStreamOnce(0, currentToken);
+          }, 350);
+          return;
+        }
         console.warn('Track playback notice:', err);
         state.isPlaying = false;
         updatePlayPauseButton(false, false);
         if (el.trackLoadingOverlay) el.trackLoadingOverlay.classList.add('hidden');
-        showToast(didTimeoutAbort ? 'Stream request timed out' : (err.message || 'Could not load audio stream'), 'error');
+        const why = didTimeoutAbort ? 'Stream request timed out' : (err.message || 'Audio stream unavailable');
+        showToast(`${track && track.title ? track.title + ' — ' : ''}${why}`, 'error');
       }
     } finally {
       clearTimeout(fetchAbortTimeout);
@@ -13451,7 +13465,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const now = Date.now();
         if (now - lastStreamErrorToastTime > 5000) {
           lastStreamErrorToastTime = now;
-          showToast('Could not load audio stream', 'error');
+          showToast('Audio stream unavailable', 'error');
         }
         return;
       }
@@ -13463,7 +13477,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const qQuality = encodeURIComponent(localStorage.getItem('riff_audio_quality') || 'medium');
         const qSearch = encodeURIComponent(cur.searchQuery || ((cur.artist ? cur.artist + ' - ' : '') + (cur.title || '')));
         const isRiffStream = localStorage.getItem('riff_library_streaming') === '1' ? '&riffStream=1' : '';
-        const forceYtDlpParam = (cur._retryCount >= 2) ? '&forceYtDlp=1' : '';
+        const forceYtDlpParam = (cur._retryCount >= 2 && cur.platform !== 'soundcloud') ? '&forceYtDlp=1' : '';
         const retryTimeoutMs = (cur._retryCount >= 2) ? 25000 : 12000;
         const retryUrl = `http://127.0.0.1:${state.serverPort}/api/stream-info?url=${encodeURIComponent(cur.url || '')}&id=${encodeURIComponent(cur.id || '')}&platform=${encodeURIComponent(cur.platform || state.platform)}&title=${encodeURIComponent(cur.title || '')}&artist=${encodeURIComponent(cur.artist || '')}&duration=${encodeURIComponent(cur.duration || 0)}&quality=${qQuality}&q=${qSearch}${forceYtDlpParam}${isRiffStream}&bust=${Date.now()}`;
         const r = await fetch(retryUrl, { signal: AbortSignal.timeout(retryTimeoutMs) });
@@ -13506,6 +13520,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       } catch (_) {}
 
+      if ((cur._retryCount || 0) < 2) {
+        // One more pass: stage 2 asks the server for a guaranteed local MP3
+        // (`forceYtDlp=1`) instead of the signed CDN stream.
+        setTimeout(() => {
+          if (myToken === state.loadToken) recoverCurrentStreamOnce(resumePos, myToken);
+        }, 500);
+        return;
+      }
+
       cur._gaveUp = true;
       cur._unavailNotice = true;
       recordFailedTrack(cur);
@@ -13524,7 +13547,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const now = Date.now();
       if (now - lastStreamErrorToastTime > 5000) {
         lastStreamErrorToastTime = now;
-        showToast('Could not load audio stream', 'error');
+        showToast('Audio stream unavailable', 'error');
       }
     }
 
@@ -36853,6 +36876,17 @@ function bindCoverHoldZoom(wrapEl) {
   const WAVE_SKIPS_KEY = 'riff_wave_skips';
   const FAILED_TRACKS_KEY = 'riff_failed_tracks';
 
+  // v0.1.10 and earlier sent synthetic album ids (`alb_dm_*`, numeric Deezer
+  // ids) straight to YouTube, so every Daily Mix row failed and got recorded
+  // here. Those rows are playable now; drop the stale blocklist once instead of
+  // silently hiding (or replacing) tracks in the user's albums.
+  try {
+    if (localStorage.getItem('riff_failed_tracks_schema') !== '2') {
+      localStorage.removeItem(FAILED_TRACKS_KEY);
+      localStorage.setItem('riff_failed_tracks_schema', '2');
+    }
+  } catch (_) {}
+
   function getFailedTracks() {
     try {
       const raw = localStorage.getItem(FAILED_TRACKS_KEY);
@@ -36912,50 +36946,10 @@ function bindCoverHoldZoom(wrapEl) {
       localStorage.setItem(FAILED_TRACKS_KEY, JSON.stringify(failed));
     } catch (_) {}
 
-    const isMatch = (t) => {
-      if (!t) return true;
-      if (trackId && String(t.id) === trackId) return true;
-      const k = (typeof getTrackNormalizedKey === 'function')
-        ? getTrackNormalizedKey(t.artist, t.title)
-        : '';
-      if (trackKey && k === trackKey) return true;
-      return isTrackFailedOrUnavailable(t);
-    };
-
-    if (Array.isArray(state.vibeTracks)) {
-      state.vibeTracks = state.vibeTracks.filter(t => !isMatch(t));
-      try {
-        localStorage.setItem('riff_my_wave_cache', JSON.stringify({ ts: Date.now(), tracks: state.vibeTracks }));
-      } catch (_) {}
-      if (window.HomeCache) {
-        window.HomeCache.set('home_vibe', state.vibeTracks);
-      }
-    }
-
-    if (Array.isArray(myWaveCurrentTracks)) {
-      myWaveCurrentTracks = myWaveCurrentTracks.filter(t => !isMatch(t));
-    }
-
-    let cachedMixes = (window.HomeCache && window.HomeCache.get('daily_mixes', 24 * 3600 * 1000)) || safeJson('riff_daily_mixes', null);
-    if (!cachedMixes) {
-      try {
-        const raw = localStorage.getItem('riff_daily_mixes');
-        if (raw) cachedMixes = JSON.parse(raw);
-      } catch (_) {}
-    }
-    if (cachedMixes && Array.isArray(cachedMixes.mixes)) {
-      cachedMixes.mixes.forEach(m => {
-        if (Array.isArray(m.tracks)) {
-          m.tracks = m.tracks.filter(t => !isMatch(t));
-        }
-      });
-      try {
-        localStorage.setItem('riff_daily_mixes', JSON.stringify(cachedMixes));
-      } catch (_) {}
-      if (window.HomeCache) {
-        window.HomeCache.set('daily_mixes', cachedMixes);
-      }
-    }
+    // Do not remove the track from the loaded queue, Daily Mix or album view.
+    // The old code filtered every failed row out immediately, so a transient
+    // network hiccup made the app look like it had replaced the user's album
+    // with different music. Keep the row; the retry path clears this on success.
 
     if (state.currentView === 'discover') {
       const sp = (localStorage.getItem('riff_home_layout') || 'spotify') === 'spotify';

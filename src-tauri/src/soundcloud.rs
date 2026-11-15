@@ -214,12 +214,57 @@ pub async fn search_tracks(
     Ok(tracks)
 }
 
-/// Resolve a SoundCloud permalink to a directly playable progressive MP3 CDN URL.
-/// Returns `None` for HLS-only or blocked tracks so callers can fall back.
-pub async fn resolve_progressive_mp3(
+#[derive(Debug, Clone)]
+pub struct ResolvedStream {
+    pub url: String,
+    pub is_hls: bool,
+}
+
+/// Exchange a transcoding descriptor for the actual CDN URL. SoundCloud returns
+/// a JSON envelope (`{"url": "..."}`) for both progressive and HLS presets.
+async fn fetch_transcoding_url(
+    state: &Arc<AppState>,
+    transcoding: &Value,
+    cid: &str,
+) -> Option<String> {
+    let tc_url = transcoding.get("url").and_then(Value::as_str)?;
+    let sep = if tc_url.contains('?') { '&' } else { '?' };
+    let stream_resp = state
+        .http()
+        .get(format!("{tc_url}{sep}client_id={cid}"))
+        .header("User-Agent", UA)
+        .header("Origin", "https://soundcloud.com")
+        .header("Referer", "https://soundcloud.com/")
+        .send()
+        .await
+        .ok()?;
+    if !stream_resp.status().is_success() {
+        util_log(
+            "WARN",
+            &format!(
+                "soundcloud: transcoding fetch status {}",
+                stream_resp.status().as_u16()
+            ),
+        );
+        return None;
+    }
+    let stream_json: Value = stream_resp.json().await.ok()?;
+    stream_json
+        .get("url")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+/// Resolve a SoundCloud permalink to something the renderer can play.
+///
+/// Most tracks expose a progressive MP3. Some (e.g. newer uploads) only have
+/// HLS renditions; those used to return `None`, which forced the slow yt-dlp
+/// fallback and then timed out. The HLS playlist is CORS-enabled and the
+/// renderer already has hls.js, so hand its `playlist.m3u8` back directly.
+pub async fn resolve_stream(
     state: &Arc<AppState>,
     permalink: &str,
-) -> Option<String> {
+) -> Option<ResolvedStream> {
     let started = Instant::now();
     let cid = client_id(state).await?;
     let resolve_url = format!(
@@ -239,7 +284,10 @@ pub async fn resolve_progressive_mp3(
     if !response.status().is_success() {
         util_log(
             "WARN",
-            &format!("soundcloud: resolve status {} for {permalink}", response.status().as_u16()),
+            &format!(
+                "soundcloud: resolve status {} for {permalink}",
+                response.status().as_u16()
+            ),
         );
         return None;
     }
@@ -247,10 +295,18 @@ pub async fn resolve_progressive_mp3(
     let transcodings = payload
         .pointer("/media/transcodings")
         .and_then(Value::as_array)?;
+
+    let protocol = |tc: &Value| {
+        tc.pointer("/format/protocol")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+
     let mut progressive = transcodings
         .iter()
         .filter(|tc| {
-            tc.pointer("/format/protocol").and_then(Value::as_str) == Some("progressive")
+            protocol(tc) == "progressive"
                 && tc
                     .pointer("/format/mime_type")
                     .and_then(Value::as_str)
@@ -266,32 +322,64 @@ pub async fn resolve_progressive_mp3(
             .map(|p| if p.contains("mp3_1_0") { 0u8 } else { 1u8 })
             .unwrap_or(1u8)
     });
-    let chosen = progressive.into_iter().next()?;
-    let tc_url = chosen.get("url").and_then(Value::as_str)?;
-    let sep = if tc_url.contains('?') { '&' } else { '?' };
-    let stream_resp = state
-        .http()
-        .get(format!("{tc_url}{sep}client_id={cid}"))
-        .header("User-Agent", UA)
-        .header("Origin", "https://soundcloud.com")
-        .send()
-        .await
-        .ok()?;
-    if !stream_resp.status().is_success() {
-        util_log(
-            "WARN",
-            &format!("soundcloud: transcoding fetch status {}", stream_resp.status().as_u16()),
-        );
-        return None;
+    for chosen in &progressive {
+        if let Some(url) = fetch_transcoding_url(state, chosen, &cid).await {
+            util_log(
+                "INFO",
+                &format!(
+                    "soundcloud: progressive resolve in {}ms",
+                    started.elapsed().as_millis()
+                ),
+            );
+            return Some(ResolvedStream {
+                url,
+                is_hls: false,
+            });
+        }
     }
-    let stream_json: Value = stream_resp.json().await.ok()?;
-    let cdn = stream_json.get("url").and_then(Value::as_str)?;
+
+    let mut hls = transcodings
+        .iter()
+        .filter(|tc| protocol(tc) == "hls")
+        .cloned()
+        .collect::<Vec<_>>();
+    // AAC 160k is the best quality/CPU tradeoff; fall back to AAC 96k, then any
+    // HLS rendition (the last one is sometimes an Opus/abr_sq stream).
+    hls.sort_by_key(|tc| {
+        let preset = tc.get("preset").and_then(Value::as_str).unwrap_or("");
+        if preset.contains("aac_160k") {
+            0u8
+        } else if preset.contains("aac_96k") {
+            1u8
+        } else if preset.contains("mp3") {
+            2u8
+        } else {
+            3u8
+        }
+    });
+    for chosen in &hls {
+        if let Some(url) = fetch_transcoding_url(state, chosen, &cid).await {
+            util_log(
+                "INFO",
+                &format!(
+                    "soundcloud: hls resolve ({}) in {}ms",
+                    chosen
+                        .get("preset")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown"),
+                    started.elapsed().as_millis()
+                ),
+            );
+            return Some(ResolvedStream { url, is_hls: true });
+        }
+    }
+
     util_log(
-        "INFO",
+        "WARN",
         &format!(
-            "soundcloud: progressive resolve in {}ms",
-            started.elapsed().as_millis()
+            "soundcloud: no playable transcoding for {permalink} ({} presets)",
+            transcodings.len()
         ),
     );
-    Some(cdn.to_string())
+    None
 }

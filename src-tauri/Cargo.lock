@@ -3018,7 +3018,7 @@ dependencies = [
 
 [[package]]
 name = "riff-rust"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "axum",
  "futures-util",

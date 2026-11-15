@@ -96,16 +96,24 @@ Release process used for v0.1.x: bump `version` in `package.json`, `src-tauri/Ca
     `signatureTimestamp` — the request needs bpctr=9999999999&has_verified=1 on the
     watch page. `/api/prefetch` + the renderer's next-track prefetch produce the MP3 while the
     current track plays; `/api/cached` lets playTrack swap a stale proxy URL for the
-    local file. UI scale: the renderer's UI-scale slider scales `--font-scale`,
-    `--sidebar-w` and `--engine-w` in place. Native or raw CSS zoom
+    local file. Album/Daily Mix rows can carry synthetic ids (`alb_dm_...`, numeric
+    Deezer ids); when the id is not an 11-char YouTube id and no usable URL is
+    present, `/api/stream-info` resolves the row with the fast inner-API search
+    using the `q`/`title`/`artist` the renderer sends (`best_search_hit`), instead of
+    asking YouTube for `watch?v=alb_...` (that was the "Track can't be loaded"
+    flood and the reason rows got skipped/replaced). UI scale: the renderer's
+    UI-scale slider scales `--font-scale`, `--sidebar-w` and `--engine-w` in
+    place. Native or raw CSS zoom
     (`document.documentElement.style.zoom` / `document.body.style.zoom`) shrinks the
     page into a dead empty corner of the window and is NOT used.
 18. SoundCloud has no auth-free "API key" in the repo: the public `client_id` is scraped
     from the front page's `a-v2.sndcdn.com/assets/*.js` bundles (cached 12 h in `state.rs`).
     `GET api-v2.soundcloud.com/search/tracks?q=...&client_id=...` works for search (~0.6 s);
-    `/resolve` returns `media.transcodings[]` and the progressive variant (protocol
-    `progressive`, mime audio/mpeg) yields the CDN MP3 after one more JSON call. If either
-    call fails the yt-dlp path (unchanged, 90 s timeout) takes over.
+    `/resolve` returns `media.transcodings[]`. Progressive MP3 (protocol `progressive`,
+    mime audio/mpeg) is still preferred; newer uploads only expose HLS (`aac_160k` /
+    `aac_96k` / `abr_sq`), so `resolve_stream` also returns the `playlist.m3u8` with
+    `is_hls: true`. Its CDN sends `Access-Control-Allow-Origin: *`, so hls.js in the
+    renderer plays it directly. If every rendition fails, the yt-dlp path takes over.
 19. googlevideo does not serve ffmpeg's TLS stack (Schannel in the gyan.dev Windows build):
     a direct `ffmpeg -i <googlevideo url>` fails with `HTTP 403`, even with yt-dlp's URL and
     even with matching User-Agents, while reqwest (rustls) and urllib fetch the same URLs
@@ -119,6 +127,12 @@ Release process used for v0.1.x: bump `version` in `package.json`, `src-tauri/Ca
 20. `find_track_by_id` probes playable extensions first everywhere (library then cache,
     then unplayable ones). Do not "simplify" it back to a single probe loop, or stale
     `.m4a` caches will shadow the `.mp3` transcodes and unplayable files resurface.
+21. The renderer's failed-track blocklist (`riff_failed_tracks`) is versioned:
+    `riff_failed_tracks_schema === '2'` clears it once on upgrade. Do not record a
+    failure by mutating the loaded queue/album/mixes (that replaced rows mid-play and
+    looked like the app skipping to other music). `playTrack` and
+    `recoverCurrentStreamOnce` retry twice (the second pass uses `forceYtDlp=1`) before
+    any failure is recorded or shown.
 
 ## Done (see PORTING.md)
 

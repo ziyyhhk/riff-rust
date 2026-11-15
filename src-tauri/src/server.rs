@@ -31,6 +31,102 @@ fn qp(q: &HashMap<String, String>, key: &str) -> String {
     q.get(key).cloned().unwrap_or_default()
 }
 
+fn is_video_id(value: &str) -> bool {
+    value.len() == 11
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn extract_video_id(url: &str) -> Option<String> {
+    let candidate = if let Some(rest) = url.split("v=").nth(1) {
+        rest
+    } else if let Some(rest) = url.split("youtu.be/").nth(1) {
+        rest
+    } else if let Some(rest) = url.split("/shorts/").nth(1) {
+        rest
+    } else {
+        return None;
+    };
+    let id = candidate
+        .split(|c: char| c == '&' || c == '?' || c == '#')
+        .next()
+        .unwrap_or("")
+        .trim();
+    if is_video_id(id) {
+        Some(id.to_string())
+    } else {
+        None
+    }
+}
+
+fn match_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// Search results are ranked by relevance already, but the first hit for an
+/// album row can still be a cover/karaoke upload. Prefer a hit whose title and
+/// artist match the row, and penalise obvious substitutes.
+fn best_search_hit<'a>(hits: &'a [Value], title: &str, artist: &str) -> &'a Value {
+    let wanted_title = match_key(title);
+    let wanted_title_prefix: String = wanted_title.chars().take(12).collect();
+    let wanted_artist = match_key(artist);
+    let mut best = &hits[0];
+    let mut best_score = i32::MIN;
+
+    for hit in hits {
+        let hit_title_raw = hit.get("title").and_then(Value::as_str).unwrap_or("");
+        let hit_artist_raw = hit.get("artist").and_then(Value::as_str).unwrap_or("");
+        let hit_title = match_key(hit_title_raw);
+        let hit_artist = match_key(hit_artist_raw);
+        let mut score = 0i32;
+
+        if !wanted_title.is_empty()
+            && !hit_title.is_empty()
+            && (hit_title.contains(&wanted_title)
+                || wanted_title.contains(&hit_title)
+                || (!wanted_title_prefix.is_empty()
+                    && hit_title.contains(&wanted_title_prefix)))
+        {
+            score += 4;
+        }
+        if !wanted_artist.is_empty()
+            && !hit_artist.is_empty()
+            && (hit_artist.contains(&wanted_artist) || wanted_artist.contains(&hit_artist))
+        {
+            score += 3;
+        }
+
+        let lower = hit_title_raw.to_lowercase();
+        let wanted_lower = title.to_lowercase();
+        for bad in [
+            "cover",
+            "karaoke",
+            "instrumental",
+            "nightcore",
+            "sped up",
+            "slowed",
+            "reverb",
+            "8d audio",
+        ] {
+            if lower.contains(bad) && !wanted_lower.contains(bad) {
+                score -= 6;
+            }
+        }
+
+        if score > best_score {
+            best_score = score;
+            best = hit;
+        }
+    }
+
+    best
+}
+
 fn json_ok(payload: Value) -> Response {
     (StatusCode::OK, Json(payload)).into_response()
 }
@@ -796,7 +892,7 @@ async fn search(State(state): State<Shared>, Query(q): Query<HashMap<String, Str
 // ------------------------------------------------------------- stream info
 
 async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
-    let id = qp(&q, "id");
+    let mut id = qp(&q, "id");
     let url = qp(&q, "url");
     let title = qp(&q, "title");
     let artist = qp(&q, "artist");
@@ -846,6 +942,57 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
             }
             // Machines with working codecs: hand back the original file anyway.
             return local_payload(util::mime_from_ext(&ext));
+        }
+    }
+
+    let is_soundcloud =
+        platform == "soundcloud" || url.to_ascii_lowercase().contains("soundcloud.com");
+
+    // Album and Daily Mix rows created by the renderer use synthetic ids such as
+    // `alb_dm_2026-11-15_1_ceef35b9_0` when the source row had no URL. Those are
+    // not YouTube video ids: the old code asked YouTube for `watch?v=alb_...` and
+    // every one of those rows failed with "video unavailable". Resolve them with
+    // the fast inner-API search using the artist/title the renderer already sends.
+    if !is_soundcloud {
+        let url_trimmed = url.trim();
+        let target_is_youtube = url_trimmed.is_empty()
+            || url_trimmed.contains("youtube.com")
+            || url_trimmed.contains("youtu.be");
+        let url_video_id = extract_video_id(url_trimmed);
+        let id_is_video = is_video_id(&id);
+
+        if target_is_youtube && !id_is_video {
+            if let Some(vid) = url_video_id {
+                id = vid;
+            } else {
+                let query = {
+                    let sent = qp(&q, "q");
+                    if sent.trim().is_empty() {
+                        format!("{artist} {title}").trim().to_string()
+                    } else {
+                        sent
+                    }
+                };
+                if !query.is_empty() {
+                    match ytm::search(&state.http(), &query, 3).await {
+                        Ok(hits) if !hits.is_empty() => {
+                            let hit = best_search_hit(&hits, &title, &artist);
+                            if let Some(vid) = hit.get("id").and_then(Value::as_str) {
+                                util::log_line(
+                                    "INFO",
+                                    &format!("stream-info: search \"{query}\" -> {vid}"),
+                                );
+                                id = vid.to_string();
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(e) => util::log_line(
+                            "WARN",
+                            &format!("stream-info search failed for \"{query}\": {e}"),
+                        ),
+                    }
+                }
+            }
         }
     }
 
@@ -904,14 +1051,12 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         util::log_line("WARN", &format!("could not transcode cached stream {id}; resolving fresh"));
     }
 
-    let is_soundcloud = platform == "soundcloud" || url.to_ascii_lowercase().contains("soundcloud.com");
-
-    // SoundCloud direct path: resolve the permalink to a progressive MP3 in about
-    // a second over SoundCloud's JSON API instead of spawning yt-dlp (about 10 to
-    // 25 seconds). Falls back to yt-dlp below when the direct resolve fails.
+    // SoundCloud direct path: resolve the permalink over SoundCloud's JSON API
+    // instead of spawning yt-dlp (about 10 to 25 seconds). Falls back to yt-dlp
+    // below when the direct resolve fails.
     if is_soundcloud {
-        match crate::soundcloud::resolve_progressive_mp3(&state, &url).await {
-            Some(mp3_url) => {
+        match crate::soundcloud::resolve_stream(&state, &url).await {
+            Some(resolved) => {
                 let port = state.server_port;
                 let cache_id = if id.len() <= 16
                     && id
@@ -924,23 +1069,34 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
                 };
                 let proxied = format!(
                     "http://127.0.0.1:{port}/api/audio-proxy?url={}",
-                    util::percent_encode(&mp3_url)
+                    util::percent_encode(&resolved.url)
                 );
-                {
-                    let dl_url = mp3_url.clone();
+                // HLS playlists already carry short-lived signatures for every
+                // segment; downloading them through yt-dlp on every play was the
+                // slow path that produced the "track can't be loaded" timeouts.
+                // Play the playlist directly (its CDN sends CORS `*`).
+                if !resolved.is_hls {
+                    let dl_url = resolved.url.clone();
                     let dl_id = cache_id.clone();
                     let dl_page = url.clone();
-                    std::thread::spawn(move || cache_resolved_stream(&dl_id, &dl_page, &dl_url));
+                    std::thread::spawn(move || {
+                        cache_resolved_stream(&dl_id, &dl_page, &dl_url)
+                    });
                 }
+                let stream_url = if resolved.is_hls {
+                    resolved.url.clone()
+                } else {
+                    proxied.clone()
+                };
                 let payload = json!({
                     "success": true,
                     "isLocal": false,
-                    "streamUrl": proxied,
-                    "rawStreamUrl": mp3_url,
+                    "streamUrl": stream_url,
+                    "rawStreamUrl": resolved.url,
                     "proxyUrl": proxied,
-                    "isHls": false,
+                    "isHls": resolved.is_hls,
                     "binaryNote": Value::Null,
-                    "mimeType": "audio/mpeg",
+                    "mimeType": if resolved.is_hls { "application/vnd.apple.mpegurl" } else { "audio/mpeg" },
                     "resolvedId": cache_id,
                     "duration": duration_q.parse::<u64>().unwrap_or(0),
                     "title": title,
@@ -1208,6 +1364,12 @@ async fn prefetch_track(State(state): State<Shared>, Query(q): Query<HashMap<Str
     }
     if !is_valid_cache_id(&id) {
         return json_ok(json!({ "success": true, "cached": false, "skipped": "invalid id" }));
+    }
+    // SoundCloud playback uses a progressive/HLS CDN URL resolved on demand.
+    // Pre-downloading it through yt-dlp burned a whole process per queue row and
+    // often timed out; the HLS path starts in ~1 s without a cache file.
+    if platform == "soundcloud" || url.to_ascii_lowercase().contains("soundcloud.com") {
+        return json_ok(json!({ "success": true, "cached": false, "skipped": "soundcloud" }));
     }
     if library::find_playable_cached_by_id(&id).is_some() {
         let port = state.server_port;
