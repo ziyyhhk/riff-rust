@@ -463,7 +463,51 @@ fn ensure_mp3_cached(resolved_id: &str, page_target: &str, stream_url: &str) -> 
         ),
     );
 
-    // 1. Progressive MP3: the CDN already serves the format WebView2 decodes.
+    // 1. YouTube: let yt-dlp resolve AND download in one process. The direct
+    // HTTP path gets throttled to ~30-60 KB/s on some networks and hangs for
+    // minutes; yt-dlp asks YouTube for a fresh URL and pulls full speed.
+    if page_target.contains("youtube.com") || page_target.contains("youtu.be") {
+        let page = if !page_target.is_empty() {
+            page_target.to_string()
+        } else if resolved_id.len() == 11 {
+            format!("https://www.youtube.com/watch?v={resolved_id}")
+        } else {
+            String::new()
+        };
+        if !page.is_empty() {
+            match ytdlp_download_target(&page, resolved_id) {
+                Some(src) => {
+                    let Some(ffmpeg) = util::resolve_binary("ffmpeg") else {
+                        let _ = fs::remove_file(&src);
+                        util::log_line("WARN", "ffmpeg missing; cannot transcode to mp3");
+                        return None;
+                    };
+                    let tmp = unique_tmp(resolved_id, "mp3.part");
+                    let ok = ffmpeg_transcode_to_mp3(&ffmpeg, &src.to_string_lossy(), &tmp);
+                    let _ = fs::remove_file(&src);
+                    if ok && write_cache_file(&tmp, &target) {
+                        util::log_line(
+                            "INFO",
+                            &format!(
+                                "cached stream {resolved_id} -> {} ({} ms)",
+                                target.display(),
+                                started.elapsed().as_millis()
+                            ),
+                        );
+                        return Some(target);
+                    }
+                    let _ = fs::remove_file(&tmp);
+                    util::log_line("WARN", &format!("background mp3 cache: transcode failed for {resolved_id}"));
+                }
+                None => {
+                    util::log_line("WARN", &format!("background mp3 cache: download failed for {resolved_id}"));
+                }
+            }
+        }
+        return None;
+    }
+
+    // 2. Progressive MP3: the CDN already serves the format WebView2 decodes.
     if path_only.ends_with(".mp3") && !stream_url.is_empty() {
         let tmp = unique_tmp(resolved_id, "mp3.part");
         if download_to_file(stream_url, &tmp) {
@@ -482,11 +526,10 @@ fn ensure_mp3_cached(resolved_id: &str, page_target: &str, stream_url: &str) -> 
         let _ = fs::remove_file(&tmp);
     }
 
-    // 2. Already-resolved stream (non-YouTube): one HTTP GET, then transcode.
-    let is_youtube = page_target.contains("youtube.com")
-        || page_target.contains("youtu.be")
-        || (page_target.is_empty() && resolved_id.len() == 11);
-    if !is_youtube && !stream_url.is_empty() && !stream_url.contains(".m3u8") {
+    // 2. Already-resolved stream: one HTTP GET, then transcode. YouTube's
+    // VISIONOS-signed URL accepts unrestricted ranges; only the old iOS URL
+    // 403s, and this degrades to the yt-dlp path when it does.
+    if !stream_url.is_empty() && !stream_url.contains(".m3u8") {
         let src = unique_tmp(resolved_id, "download");
         let downloaded = download_to_file(stream_url, &src);
         if downloaded {
@@ -938,7 +981,9 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
     // in-flight job for the same track instead of starting a second download.
     if force_yt_dlp && !is_soundcloud {
         let input = if id.len() == 11 {
-            String::new()
+            crate::ytm_player::visionos_audio_url(&id, &quality, &state)
+                .await
+                .unwrap_or_default()
         } else {
             crate::ytm_player::direct_audio_url(&id, &quality, &state)
                 .await
@@ -970,7 +1015,12 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
     // Skipped when the renderer asked to force yt-dlp after a decode failure or
     // for SoundCloud links (SoundCloud uses its own direct resolver above).
     if !force_yt_dlp && !is_soundcloud {
-        if let Some(direct_url) = crate::ytm_player::direct_audio_url(&id, &quality, &state).await {
+        let direct_url = match crate::ytm_player::visionos_audio_url(&id, &quality, &state).await {
+            Some(url) => Some(url),
+            // iOS inner client as a last resort (it only serves ~256 KB).
+            None => crate::ytm_player::direct_audio_url(&id, &quality, &state).await,
+        };
+        if let Some(direct_url) = direct_url {
             let resolved_id = id.clone();
         let port = state.server_port;
         let proxied = format!(

@@ -85,16 +85,21 @@ Release process used for v0.1.x: bump `version` in `package.json`, `src-tauri/Ca
 17. Playback order in `stream_info` (get it backwards and code=4 returns):
     local library → playable cache (mp3/wav/flac) → any cached track re-encoded to mp3
     (source m4a deleted) → SoundCloud direct resolve (progressive MP3, ~1 s) → stream
-    cache (10 min) → direct inner-API / v1/player → yt-dlp fallback. The renderer's second
-    retry passes `forceYtDlp=1`; it now transcodes into `tracks/<id>.mp3` (single-flight,
-    `ensure_mp3_cached`) and returns `/api/local-track?id=<id>` (guaranteed decode).
-    **The inner-API (iOS client) googlevideo URL only serves its first ~256 KB and 403s
-    every later byte** — never rely on it for downloads or full playback. All caching goes
-    through yt-dlp (`ytdlp_download_target`, ~8-15 s/run, hidden console, 150 s cap).
-    `/api/prefetch` + the renderer's next-track prefetch produce the MP3 while the current
-    track plays; `/api/cached` lets playTrack swap a stale proxy URL for the local file.
-    Cache production is deduped in `cache_work()` — prefetch and recovery never run two
-    yt-dlp downloads for one track.
+    cache (10 min) → **VISIONOS inner-client / v1/player with the current player JS
+    `signatureTimestamp`** (unrestricted byte ranges; ~0.3 s when warm, ~2-3 s cold;
+    cached 24 h in `visionos_context`) → iOS inner-client (only serves ~256 KB) →
+    yt-dlp fallback. The renderer's second retry passes `forceYtDlp=1`; it transcodes
+    into `tracks/<id>.mp3` via `ensure_mp3_cached` (single-flight — prefetch and
+    recovery never download the same track twice) and returns `/api/local-track?id=<id>`
+    (guaranteed decode). The VISIONOS inner client only returns a playable URL when
+    the request carries both the watch page's visitorData and the current player JS
+    `signatureTimestamp` — the request needs bpctr=9999999999&has_verified=1 on the
+    watch page. `/api/prefetch` + the renderer's next-track prefetch produce the MP3 while the
+    current track plays; `/api/cached` lets playTrack swap a stale proxy URL for the
+    local file. UI scale: the renderer's UI-scale slider scales `--font-scale`,
+    `--sidebar-w` and `--engine-w` in place. Native or raw CSS zoom
+    (`document.documentElement.style.zoom` / `document.body.style.zoom`) shrinks the
+    page into a dead empty corner of the window and is NOT used.
 18. SoundCloud has no auth-free "API key" in the repo: the public `client_id` is scraped
     from the front page's `a-v2.sndcdn.com/assets/*.js` bundles (cached 12 h in `state.rs`).
     `GET api-v2.soundcloud.com/search/tracks?q=...&client_id=...` works for search (~0.6 s);

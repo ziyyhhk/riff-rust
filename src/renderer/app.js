@@ -2199,7 +2199,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
     if (!localStorage.getItem('devsize_ui_scale') || localStorage.getItem('devsize_ui_scale') === '100') {
-      localStorage.setItem('devsize_ui_scale', '105');
+      localStorage.setItem('devsize_ui_scale', '75');
     }
   }
 
@@ -2215,18 +2215,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     localStorage.setItem('riff_adv_track_banners', 'false');
   }
 
-  const savedScale = parseFloat(localStorage.getItem('devsize_ui_scale') || '105');
-  applyScale(savedScale);
-
+  const INTERFACE_BASE = { fontScale: 1.1875, sidebar: 288, engine: 435 };
+  // Scale fonts and the structural panels directly in CSS units. A native or
+  // CSS zoom shrinks the whole page into a corner of the window and leaves a
+  // dead black void — this fills the window correctly at any size.
   function applyScale(scalePercent) {
-    const factor = (scalePercent / 100) * 0.90;
-    document.documentElement.style.setProperty('--app-scale', factor.toString());
-    if (window.electronAPI && window.electronAPI.setZoomFactor) {
-      window.electronAPI.setZoomFactor(factor);
-    } else {
-      document.body.style.zoom = factor;
-    }
+    const factor = Math.max(0.5, Math.min(1.6, (Number(scalePercent) || 75) / 100));
+    const root = document.documentElement;
+    root.style.setProperty('--font-scale', (INTERFACE_BASE.fontScale * factor).toFixed(4));
+    root.style.setProperty('--sidebar-w', Math.round(INTERFACE_BASE.sidebar * factor) + 'px');
+    root.style.setProperty('--engine-w', Math.round(INTERFACE_BASE.engine * factor) + 'px');
   }
+
+  const savedScale = parseFloat(localStorage.getItem('devsize_ui_scale') || '75');
+  applyScale(savedScale);
 
   window.addEventListener('scroll', () => {
     if (window.scrollY !== 0 || window.scrollX !== 0) {

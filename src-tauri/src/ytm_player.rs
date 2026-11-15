@@ -156,6 +156,161 @@ fn pick_audio_url(data: &Value, quality: &str) -> Option<String> {
     audio.into_iter().next().map(|(_, _, u)| u)
 }
 
+// ------------------------------------------------------------ visionos fast path
+//
+// The iOS client's signed URL only serves its first ~256 KB and 403s on every
+// later byte, which is why every uncached track needed a 10-16 s yt-dlp
+// fallback. The VISIONOS inner client (the one yt-dlp tries first, JS-less)
+// returns an unrestricted URL, but only when the request carries the current
+// player JS's `signatureTimestamp`. That value changes whenever YouTube ships
+// a new player, so it is scraped from watch page -> base.js and cached 24 h.
+const VISIONOS_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
+const PLAYER_CTX_TTL_SECS: u64 = 60 * 60 * 24;
+const PAGE_TIMEOUT_SECS: u64 = 8;
+
+static VISIONOS_CONTEXT: Mutex<Option<(u32, String, Instant)>> = Mutex::new(None);
+
+fn extract_between<'a>(hay: &'a str, start: &str, end: char) -> Option<&'a str> {
+    let idx = hay.find(start)?;
+    let tail = &hay[idx + start.len()..];
+    let end_idx = tail.find(end)?;
+    Some(&tail[..end_idx])
+}
+
+/// www.youtube.com/watch…embeds the player file as "/s/player/<key>/<variant>/base.js".
+fn extract_player_url(page: &str) -> Option<String> {
+    let idx = page.find("/s/player/")?;
+    let marker = "base.js";
+    let end = page[idx..].find(marker)? + idx + marker.len();
+    Some(format!("https://www.youtube.com{}", &page[idx..end]))
+}
+
+fn extract_signature_timestamp(player_js: &str) -> Option<u32> {
+    let idx = player_js.find("signatureTimestamp")?;
+    let digits: String = player_js[idx..]
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit())
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse::<u32>().ok()
+}
+
+fn extract_visitor_data(page: &str) -> Option<String> {
+    extract_between(page, "\"visitorData\":\"", '"').map(str::to_string)
+}
+
+async fn fetch_text(client: &reqwest::Client, url: &str) -> Option<String> {
+    let resp = client
+        .get(url)
+        .header("User-Agent", VISIONOS_UA)
+        .timeout(Duration::from_secs(PAGE_TIMEOUT_SECS))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.text().await.ok()
+}
+
+/// (signatureTimestamp, visitorData) from the watch page + player JS, cached for a day.
+async fn visionos_context(video_id: &str, client: &reqwest::Client) -> Option<(u32, Option<String>)> {
+    {
+        let guard = VISIONOS_CONTEXT.lock().ok()?;
+        if let Some((sts, visitor, cached_at)) = guard.as_ref() {
+            if cached_at.elapsed() < Duration::from_secs(PLAYER_CTX_TTL_SECS) {
+                return Some((*sts, Some(visitor.clone())));
+            }
+        }
+    }
+    let page_url = format!("https://www.youtube.com/watch?v={video_id}&bpctr=9999999999&has_verified=1");
+    let page = fetch_text(client, &page_url).await?;
+    let player_url = extract_player_url(&page)?;
+    let player_js = fetch_text(client, &player_url).await?;
+    let sts = extract_signature_timestamp(&player_js)?;
+    let visitor = extract_visitor_data(&page).unwrap_or_default();
+    if let Ok(mut guard) = VISIONOS_CONTEXT.lock() {
+        *guard = Some((sts, visitor.clone(), Instant::now()));
+    }
+    if visitor.is_empty() {
+        return Some((sts, None));
+    }
+    Some((sts, Some(visitor)))
+}
+
+/// Roughly 0.3 s when the player-context cache is warm (it refills once a day),
+/// about 2-3 s when cold. The returned URL works with unrestricted byte ranges.
+pub async fn visionos_audio_url(
+    video_id: &str,
+    quality: &str,
+    state: &Arc<AppState>,
+) -> Option<String> {
+    if video_id.chars().count() != 11
+        || !video_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+    let client = state.http();
+    let (sts, visitor) = visionos_context(video_id, &client).await?;
+    let mut client_ctx = json!({
+        "clientName": "VISIONOS",
+        "clientVersion": "1.02",
+        "hl": "en",
+        "gl": "US",
+        "deviceMake": "Apple",
+        "deviceModel": "RealityDevice17,1",
+        "osName": "visionOS",
+        "osVersion": "26.5.23O471",
+        "userAgent": VISIONOS_UA,
+        "timeZone": "UTC",
+        "utcOffsetMinutes": 0,
+    });
+    if let Some(v) = &visitor {
+        client_ctx["visitorData"] = json!(v);
+    }
+    let body = json!({
+        "videoId": video_id,
+        "context": { "client": client_ctx },
+        "playbackContext": {
+            "contentPlaybackContext": {
+                "html5Preference": "HTML5_PREF_WANTS",
+                "signatureTimestamp": sts,
+            }
+        },
+        "contentCheckOk": true,
+        "racyCheckOk": true,
+    });
+    let mut req = client
+        .post("https://www.youtube.com/youtubei/v1/player?prettyPrint=false")
+        .header("Content-Type", "application/json")
+        .header("Origin", "https://www.youtube.com")
+        .header("User-Agent", VISIONOS_UA)
+        .header("X-YouTube-Client-Name", "101")
+        .header("X-YouTube-Client-Version", "1.02");
+    if let Some(v) = &visitor {
+        req = req.header("X-Goog-Visitor-Id", v.as_str());
+    }
+    let Some(resp) = req
+        .timeout(Duration::from_secs(PLAYER_TIMEOUT_SECS))
+        .json(&body)
+        .send()
+        .await
+        .ok()
+    else {
+        return None;
+    };
+    if !resp.status().is_success() {
+        return None;
+    }
+    let data: Value = resp.json::<Value>().await.ok()?;
+    if data.get("playabilityStatus").and_then(|v| v.get("status")).and_then(Value::as_str) != Some("OK") {
+        return None;
+    }
+    pick_audio_url(&data, quality)
+}
+
+// --------------------------------------------------------------------------------
+
 /// Returns itag-compatible url for the requested video (or None if every client fails).
 pub async fn direct_audio_url(video_id: &str, quality: &str, state: &Arc<AppState>) -> Option<String> {
     if video_id.chars().count() != 11

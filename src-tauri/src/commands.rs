@@ -249,7 +249,19 @@ pub fn set_mini_lyrics(enabled: bool, app: AppHandle, state: State<'_, Shared>) 
 }
 
 #[tauri::command]
-pub fn set_zoom_factor(_factor: f64) {}
+pub fn set_zoom_factor(factor: f64, app: AppHandle) {
+    // Same units the renderer uses for its UI-scale slider: font tokens and the
+    // structural panels. A native (or raw CSS) zoom leaves the page floating in
+    // a dead void, so we scale the CSS properties instead.
+    if let Some(w) = app.get_webview_window("main") {
+        let requested = factor.clamp(0.5, 1.6);
+        let js = format!(
+            "document.documentElement.style.setProperty('--font-scale',(1.1875*{requested}).toFixed(4));document.documentElement.style.setProperty('--sidebar-w',Math.round(288*{requested})+'px');document.documentElement.style.setProperty('--engine-w',Math.round(435*{requested})+'px');"
+        );
+        let _ = w.eval(&js);
+        util::log_line("INFO", &format!("ui scale set to {requested:.3}"));
+    }
+}
 
 #[tauri::command]
 pub fn get_zoom_factor() -> f64 {
