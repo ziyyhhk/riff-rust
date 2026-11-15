@@ -350,12 +350,18 @@ fn write_activity(shared: &Arc<Mutex<Shared>>, activity: &Value, connected: &Arc
     };
     let pid = std::process::id();
     match call_set_activity(&pipe, &activity_from(activity), pid) {
-        Ok(()) => connected.store(true, Ordering::Relaxed),
+        Ok(()) => {
+            connected.store(true, Ordering::Relaxed);
+            let title = activity.get("title").and_then(Value::as_str).unwrap_or("?");
+            let artist = activity.get("artist").and_then(Value::as_str).unwrap_or("?");
+            crate::util::log_line("INFO", &format!("discord activity sent: {artist} — {title}"));
+        }
         Err(_) => {
             connected.store(false, Ordering::Relaxed);
             if let Ok(mut guard) = shared.lock() {
                 guard.pipe = None;
             }
+            crate::util::log_line("WARN", "discord activity write failed");
         }
     }
 }

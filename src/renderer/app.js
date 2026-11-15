@@ -5406,7 +5406,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const activeGap = cachedActiveGapEl;
       if (activeGap && state.isPlaying && state.syncedLyrics) {
         const curTime = getSmoothAudioTime();
-        const lookAhead = state.isCustomLyrics ? 0.25 : 0.0;
+        const lookAhead = 0.2; // keep all lyrics slightly ahead of the vocal to hide parser jitter
         updateActiveGapProgress(activeGap, curTime + lookAhead);
       }
 
@@ -9119,7 +9119,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!container || container.offsetParent === null) return;
 
     const validLines = getCachedValidLines();
-    const lookAhead = state.isCustomLyrics ? 0.25 : 0.0;
+    const lookAhead = 0.2; // keep all lyrics slightly ahead of the vocal to hide parser jitter
     const matchTime = currentTime + lookAhead;
     const activeIndex = findActiveLineIndex(validLines, matchTime);
 
@@ -9975,7 +9975,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const start = getLineStartTime(lineIdx);
     const end = getLineEndTime(lineIdx);
     const dur = Math.max(0.1, end - start);
-    const lookAhead = state.isCustomLyrics ? 0.25 : 0.0;
+    const lookAhead = 0.2; // keep all lyrics slightly ahead of the vocal to hide parser jitter
     const effectiveTime = (state.isPlaying && typeof getSmoothAudioTime === 'function')
       ? (getSmoothAudioTime() + lookAhead)
       : ((time !== undefined && time !== null) ? time : ((el.nativeAudio ? el.nativeAudio.currentTime : 0) + lookAhead));
@@ -10462,7 +10462,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!state.syncedLyrics || state.syncedLyrics.length === 0 || !state.isWindowVisible) return;
 
     const validLines = getCachedValidLines();
-    const lookAhead = state.isCustomLyrics ? 0.25 : 0.0;
+    const lookAhead = 0.2; // keep all lyrics slightly ahead of the vocal to hide parser jitter
     const matchTime = currentTime + lookAhead;
     const activeIndex = findActiveLineIndex(validLines, matchTime);
     const activeIdx = activeIndex;

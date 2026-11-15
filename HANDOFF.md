@@ -109,8 +109,8 @@ First-run onboarding wizard (upstream-identical), launcher Start-menu shortcut (
 1. Google/YouTube sign-in & import (OAuth PKCE + account file) - upstream: google-oauth.js, youtube-data.js
 2. Spotify account integration (auth, library) - import works, account features don't
 3. Apple Music / Deezer / Yandex / TikTok / VK import
-4. i18n batch translations (Korean UI strings for welcome/app)
-5. Auto-updater (no feed), plugin execution sandbox
+4. Plugin execution sandbox, auto-updater (no feed yet)
+
 
 ## Honesty rules
 

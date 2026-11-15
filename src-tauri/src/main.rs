@@ -4,6 +4,7 @@ mod commands;
 mod discord_rpc;
 mod discovery;
 mod lyrics;
+mod ytm_player;
 mod library;
 mod server;
 mod state;

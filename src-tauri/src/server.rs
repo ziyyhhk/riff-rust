@@ -389,6 +389,40 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
     {
         return json_ok(cached);
     }
+
+    // Fast path: inner youtubei `/v1/player` — no subprocess, ~0.2-0.5s.
+    if let Some(direct_url) = crate::ytm_player::direct_audio_url(&id, &quality, &state).await {
+        let resolved_id = id.clone();
+        let port = state.server_port;
+        let proxied = format!(
+            "http://127.0.0.1:{port}/api/audio-proxy?url={}",
+            util::percent_encode(&direct_url)
+        );
+        util::log_line("INFO", &format!("stream-info(direct) resolved {resolved_id}"));
+        let payload = json!({
+            "success": true,
+            "isLocal": false,
+            "streamUrl": proxied,
+            "rawStreamUrl": direct_url,
+            "proxyUrl": proxied,
+            "isHls": direct_url.contains(".m3u8"),
+            "binaryNote": Value::Null,
+            "mimeType": "audio/mp4",
+            "resolvedId": resolved_id,
+            "duration": duration_q.parse::<u64>().unwrap_or(0),
+            "title": title,
+            "artist": artist,
+            "thumbnail": "",
+            "direct": true,
+        });
+        {
+            let dl_url = direct_url.clone();
+            let dl_id = resolved_id.clone();
+            std::thread::spawn(move || cache_resolved_stream(&dl_id, "m4a", &dl_url));
+        }
+        state::cache_put(&state.stream_cache, cache_key, payload.clone(), 256, Duration::from_secs(600));
+        return json_ok(payload);
+    }
     let format_arg = match quality.as_str() {
         "low" | "worst" => "worstaudio[ext=m4a]/worstaudio",
         "medium" => "bestaudio[abr<=96][ext=m4a]/bestaudio[ext=m4a]/bestaudio[abr<=96]/bestaudio",

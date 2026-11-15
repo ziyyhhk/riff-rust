@@ -65,7 +65,7 @@ The Electron main process and Node server were replaced with Rust.
 - âœ… Window visibility events (`window-visibility`) on minimize/restore/hide/show, so the renderer
   can pause visualizers/background video while hidden.
 - âœ… Shared pooled HTTP client (connection reuse, gzip) and bounded TTL caches for search/stream URLs
-- âœ… "Riff Library" hybrid search (`platform=rifflibrary`): single ranked list combining YouTube Music + SoundCloud interleaved 2:1, like upstream's unified pool. `/api/stream-info` returns `streamUrl`/`proxyUrl`/`rawStreamUrl` in upstream's shape; audio plays through the loopback `/api/audio-proxy` (edition that makes the Web Audio chain work), and resolved streams are cached to `tracks/<id>` in the background so repeat plays are local.
+- ✅ Direct inner-API audio resolution (v0.1.7 src-tauri/src/ytm_player.rs): /api/stream-info tries YouTube /youtubei/v1/player first (IOS + ANDROID_MUSIC, visitorData hot-swap) before falling back to yt-dlp; cold track resolves run 0.3-1.5s vs ~8s before. Also "Riff Library" hybrid search (platform=rifflibrary): single ranked list combining YouTube Music + SoundCloud interleaved 2:1; /api/stream-info returns streamUrl/proxyUrl upstream shape, audio plays through loopback /api/audio-proxy, and resolved streams cached to tracks/ in the background for repeat plays.
 - âœ… Discovery/recommendations (`src-tauri/src/discovery.rs`): country charts (`/api/top-chart`,
   YouTube Charts playlist browse via YTM inner API + iTunes RSS + Last.fm fallback), `/api/vibe`
   (seeded by YTM RDAMVM mixes + Deezer related artists, 20-minute cache), `/api/trending`
