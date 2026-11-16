@@ -21757,10 +21757,12 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
     if (!el.viewSettings) return;
     if (typeof resetSettingsSearch === 'function') resetSettingsSearch();
     if (settingsCloseTimer) { clearTimeout(settingsCloseTimer); settingsCloseTimer = null; }
-    const savedCat = cat || localStorage.getItem('riff_settings_cat');
+    // Always land on Interface when the gear is clicked. The last-used category
+    // used to be restored silently, which reads as "every settings click opens
+    // Account".
     el.viewSettings.classList.add('active', 'modal-open');
     el.viewSettings._activeCat = null;
-    showSettingsCategory((savedCat === 'overview' || !savedCat) ? 'interface' : savedCat);
+    showSettingsCategory(cat || 'interface');
     setTimeout(() => {
       if (typeof syncAllThemeToggleIndicators === 'function') syncAllThemeToggleIndicators();
       updateOfflineStorageUI();
@@ -24337,6 +24339,8 @@ function bindCoverHoldZoom(wrapEl) {
       sw.addEventListener('click', () => {
         state.themeAccent = sw.dataset.color;
         localStorage.setItem('riff_theme_accent', state.themeAccent);
+        const colorLabel = document.getElementById('settings-theme-color-label');
+        if (colorLabel) colorLabel.textContent = sw.dataset.color.toUpperCase();
         ensureAccentVisible();
         if (state.themeMode === 'auto') {
           const targetMode = currentEffectiveMode || 'dark';
@@ -24353,6 +24357,8 @@ function bindCoverHoldZoom(wrapEl) {
       if (!/^#[0-9a-f]{6}$/i.test(value)) return;
       state.themeAccent = value.toLowerCase();
       localStorage.setItem('riff_theme_accent', state.themeAccent);
+      const colorLabel2 = document.getElementById('settings-theme-color-label');
+      if (colorLabel2) colorLabel2.textContent = state.themeAccent.toUpperCase();
       ensureAccentVisible();
       if (state.themeMode === 'auto') {
         const targetMode = currentEffectiveMode || 'dark';
