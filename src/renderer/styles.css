@@ -8478,16 +8478,17 @@ body.mini.mini-lyrics-on #btn-mini-lyrics {
 .settings-pane .settings-section[data-cat="storage"] > .settings-section-title,
 .settings-pane .settings-section[data-cat="about"] > .settings-section-title { display: none; }
 
+#app-layout, .main-content { z-index: auto !important; }
 #view-settings,
 #view-settings.active {
   position: fixed !important;
   inset: 0 !important;
-  z-index: 99985 !important;
-  background: rgba(0, 0, 0, 0.52) !important;
+  z-index: 99999 !important;
+  background: radial-gradient(120% 80% at 50% 0%, rgba(12, 12, 14, 0.86), rgba(8, 8, 10, 0.78)) !important;
   -webkit-mask-image: none !important;
   mask-image: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
+  backdrop-filter: blur(14px) saturate(110%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(110%) !important;
   filter: none !important;
   transform: none !important;
   will-change: auto !important;
@@ -8515,11 +8516,11 @@ body.mini.mini-lyrics-on #btn-mini-lyrics {
 }
 #view-settings .settings-view {
   position: relative;
-  width: min(1060px, 94vw);
-  height: min(750px, 88vh);
-  background: color-mix(in srgb, var(--md-sys-color-surface-container-low-solid, #18191c) min(var(--ui-alpha, 75%), 75%), transparent) !important;
-  backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
+  width: min(1100px, 96vw);
+  height: min(92vh, 900px);
+  background: var(--md-sys-color-surface-container-lowest, #141517) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
   border-radius: 28px;
   padding: 0 !important;
   display: flex;
@@ -8554,7 +8555,7 @@ body.mini.mini-lyrics-on #btn-mini-lyrics {
   padding: 18px 12px !important;
   gap: 4px !important;
   box-sizing: border-box !important;
-  background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest-solid, #121316) var(--ui-alpha, 100%), transparent) !important;
+  background: var(--md-sys-color-surface-container-low, #1b1c1f) !important;
 }
 #view-settings .settings-nav .settings-nav-btn:not(#settings-nav-account) {
   height: 48px !important;
@@ -13953,8 +13954,8 @@ body:not(.cover-bg-on) .cover-bg-layer {
   will-change: auto !important;
 }
 
-.settings-nav { min-height: calc(100vh - 210px); }
-.settings-account-nav-btn { height: 54px !important; padding: 6px 12px !important; gap: 10px !important; margin-top: auto !important; border-radius: 12px !important; }
+#view-settings .settings-nav { min-height: 0 !important; }
+.settings-account-nav-btn { height: 54px !important; padding: 6px 12px !important; gap: 10px !important; border-radius: 12px !important; }
 .settings-nav-avatar { width: 34px; height: 34px; min-width: 34px; border-radius: 50%; object-fit: cover; background: var(--md-sys-color-surface-container-highest); flex-shrink: 0; }
 .settings-nav-account-meta { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
 .settings-nav-account-name { font-size: calc(13.5px * var(--font-scale, 1)); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -14179,7 +14180,7 @@ body.perf .tg-pat-meme.switching {
     max-height: 48px !important;
     padding: 0 12px !important;
     gap: 10px !important;
-    margin-top: auto !important;
+    margin-top: 0 !important;
     display: flex !important;
     align-items: center !important;
     justify-content: flex-start !important;
