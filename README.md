@@ -1,5 +1,5 @@
 ﻿<p align="center">
-  <img src="readme-hero.png" alt="Riff Rust, a desktop music player and audio suite for YouTube Music, SoundCloud, and local files" width="100%">
+  <img src="readme-hero.png?v=3" alt="Riff Rust, a desktop music player and audio suite for YouTube Music, SoundCloud, and local files" width="100%">
 </p>
 
 <p align="center">
