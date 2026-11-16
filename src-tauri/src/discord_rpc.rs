@@ -268,10 +268,11 @@ fn reader_loop(shared: Arc<Mutex<Shared>>, connected: Arc<AtomicBool>) {
                             crate::util::log_line("INFO", "discord rpc connected");
                         }
                     }
-                    Some("SET_ACTIVITY") => {
+                    Some("SET_ACTIVITY") | Some("ERROR") => {
                         if let Some(err) = frame.get("data").and_then(|d| d.get("code")).and_then(Value::as_i64) {
                             if err != 0 {
                                 crate::util::log_line("WARN", &format!("discord rpc set_activity error {err}: {}", frame.get("data").and_then(|d| d.get("message")).and_then(Value::as_str).unwrap_or("?")));
+                                connected.store(false, Ordering::Relaxed);
                             }
                         }
                     }
@@ -362,7 +363,6 @@ fn write_activity(shared: &Arc<Mutex<Shared>>, activity: &Value, connected: &Arc
     let pid = std::process::id();
     match call_set_activity(&pipe, &activity_from(activity), pid) {
         Ok(()) => {
-            connected.store(true, Ordering::Relaxed);
             let title = activity.get("title").and_then(Value::as_str).unwrap_or("?");
             let artist = activity.get("artist").and_then(Value::as_str).unwrap_or("?");
             crate::util::log_line("INFO", &format!("discord activity sent: {artist} — {title}"));

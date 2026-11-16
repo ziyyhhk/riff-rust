@@ -327,7 +327,10 @@ fn main() {
             let start_url = if first_run { "welcome.html" } else { "index.html" };
             let bg = if first_run { tauri::window::Color(141, 94, 242, 255) } else { tauri::window::Color(0, 0, 0, 255) };
             let (win_w, win_h, win_x, win_y, win_maximized) = startup_geometry(app);
+            // Cap WebView2 at one renderer process for this single static page.
+            // Keep wry's default feature disables explicitly (this flag overrides them).
             let window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App(start_url.into()))
+                .additional_browser_args("--renderer-process-limit=1 --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection")
                 .title("Riff Rust")
                 .inner_size(win_w, win_h)
                 .position(win_x, win_y)

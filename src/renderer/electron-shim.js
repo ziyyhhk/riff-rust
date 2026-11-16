@@ -104,7 +104,7 @@
 
     // --- file dialogs (driven by the dialog plugin's JS API) ---
     pickMedia: async () => {
-      const files = await pickFiles({ filters: [{ name: 'Media', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm'] }] });
+      const files = await pickFiles({ filters: [{ name: 'Media', extensions: ['png', 'jpg', 'jpeg', 'jfif', 'jif', 'jpe', 'bmp', 'gif', 'webp', 'avif', 'tif', 'tiff', 'ico', 'mp4', 'webm', 'mov', 'mkv', 'avi'] }] });
       if (!files || files.length === 0) return null;
       const core = tauri && tauri.core;
       if (core && typeof core.convertFileSrc === 'function') {
