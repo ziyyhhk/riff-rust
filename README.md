@@ -43,7 +43,6 @@
   <a href="https://github.com/ziyyhhk/riff-rust/stargazers"><img src="https://img.shields.io/github/stars/ziyyhhk/riff-rust?style=flat-square&labelColor=16191C&color=CAD3F5" alt="Stars"></a>
   <a href="https://github.com/ziyyhhk/riff-rust/commits/main"><img src="https://img.shields.io/github/last-commit/ziyyhhk/riff-rust?style=flat-square&labelColor=16191C&color=94C9FF" alt="Last Commit"></a>
   <a href="https://github.com/ziyyhhk/riff-rust/blob/main/LICENSE"><img src="https://img.shields.io/github/license/ziyyhhk/riff-rust?style=flat-square&labelColor=16191C&color=8EEDD8" alt="License"></a>
-  <a href="https://ko-fi.com/rootlesszen"><img src="https://img.shields.io/badge/Kofi-support-FF5E5B?style=flat-square&logo=kofi&logoColor=white&labelColor=16191C" alt="Support on Kofi"></a>
 </p>
 
 > [!IMPORTANT]
@@ -192,10 +191,6 @@ Yes. Native Discord Rich Presence displays the currently playing track title, ar
 
 **Are there official mobile builds?**
 No official mobile releases exist. Third party community ports may appear in the future; this repository does not distribute them.
-
-## Support
-
-You can Support ongoing development via [Kofi](https://ko-fi.com/rootlesszen). Repository stars on GitHub are also appreciated.
 
 ## Disclaimer
 
