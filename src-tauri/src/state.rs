@@ -65,6 +65,8 @@ pub struct AppState {
     /// Cached reqwest client, keyed by proxy URL. Rebuilding a client per request
     /// throws away the connection pool and forces a fresh TLS handshake every time.
     pub http: Mutex<Option<(String, reqwest::Client)>>,
+    /// Streaming client without the API deadline (see `streaming_http`).
+    pub stream_http: Mutex<Option<(String, reqwest::Client)>>,
     /// Resolved stream URLs (short TTL; URLs expire and are signature-bound).
     pub stream_cache: Mutex<HashMap<String, (Instant, Value)>>,
     /// YouTube Music search results (short TTL).
@@ -105,6 +107,7 @@ impl AppState {
             media_keys: Mutex::new(true),
             media_keys_active: Mutex::new(false),
             http: Mutex::new(None),
+    stream_http: Mutex::new(None),
             stream_cache: Mutex::new(HashMap::new()),
             search_cache: Mutex::new(HashMap::new()),
             mini: Mutex::new(None),
@@ -135,6 +138,37 @@ impl AppState {
         let mut builder = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(6))
             .timeout(Duration::from_secs(8))
+            .pool_max_idle_per_host(16)
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) RiffRust/0.1")
+            .gzip(true);
+        if !proxy.trim().is_empty() {
+            match reqwest::Proxy::all(proxy.trim()) {
+                Ok(p) => builder = builder.proxy(p),
+                Err(e) => crate::util::log_line("WARN", &format!("ignoring invalid proxy {proxy:?}: {e}")),
+            }
+        }
+        let client = builder.build().unwrap_or_else(|_| reqwest::Client::new());
+        *slot = Some((proxy, client.clone()));
+        client
+    }
+
+    /// A second pooled client without the API client's 8 s ceiling. Streaming
+    /// and image routes need it: reqwest 0.12 `timeout()` is the total deadline
+    /// from connect until the response body finishes, so uncached YouTube/AAC
+    /// bodies were truncated at ~8 s even though playback was mid-buffer.
+    pub fn streaming_http(&self) -> reqwest::Client {
+        let proxy = self.proxy_url.lock().map(|p| p.clone()).unwrap_or_default();
+        let mut slot = match self.stream_http.lock() {
+            Ok(slot) => slot,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some((cached_proxy, client)) = slot.as_ref() {
+            if cached_proxy == &proxy {
+                return client.clone();
+            }
+        }
+        let mut builder = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
             .pool_max_idle_per_host(16)
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) RiffRust/0.1")
             .gzip(true);
@@ -210,7 +244,15 @@ pub fn cache_put<V>(
     if map.len() >= cap {
         map.retain(|_, (at, _)| at.elapsed() < ttl);
         if map.len() >= cap {
-            map.clear();
+            // Evict the oldest entries; never wipe recently cached lyric
+            // sources/URLs when the map is full.
+            let mut by_age: Vec<(String, Instant)> =
+                map.iter().map(|(k, (at, _))| (k.clone(), *at)).collect();
+            by_age.sort_by_key(|(_, at)| *at);
+            let remove = map.len().saturating_sub(cap) + 1;
+            for (k, _) in by_age.into_iter().take(remove) {
+                map.remove(&k);
+            }
         }
     }
     map.insert(key, (Instant::now(), value));

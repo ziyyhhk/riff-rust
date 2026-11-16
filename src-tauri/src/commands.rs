@@ -780,9 +780,46 @@ pub fn write_cache_file(data: serde_json::Value) -> bool {
 }
 
 #[tauri::command]
-pub fn save_playlists_json(payload: serde_json::Value) -> serde_json::Value {
-    let _ = util::write_json_file(&util::playlists_path(), &payload);
-    serde_json::json!({ "success": true })
+pub fn save_playlists_json(payload: serde_json::Value, state: State<'_, Shared>) -> serde_json::Value {
+    // The renderer passes { content: "<pretty-printed JSON>", defaultName }.
+    // Write that content straight to the user's download directory so the
+    // export is actually findable instead of burying it inside an internal
+    // playlists.json under an opaque data dir.
+    let content = payload.get("content").and_then(|v| v.as_str()).map(str::to_string);
+    let requested = payload
+        .get("defaultName")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let dir = {
+        let configured = state.download_dir.lock().map(|d| d.clone()).unwrap_or_default();
+        if configured.trim().is_empty() {
+            default_download_dir()
+        } else {
+            configured
+        }
+    };
+    match content {
+        Some(text) => {
+            let safe = requested
+                .unwrap_or_else(|| "riff-playlists.json".to_string())
+                .chars()
+                .map(|c| if c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' { '_' } else { c })
+                .collect::<String>();
+            let target = std::path::Path::new(&dir).join(safe);
+            if let Some(parent) = target.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            match fs::write(&target, text) {
+                Ok(()) => return serde_json::json!({ "success": true, "path": target.to_string_lossy() }),
+                Err(e) => return serde_json::json!({ "success": false, "error": format!("could not write export: {e}") }),
+            }
+        }
+        None => {
+            // Backward-compatible path for callers sending a raw payload.
+            let _ = util::write_json_file(&util::playlists_path(), &payload);
+            serde_json::json!({ "success": true })
+        }
+    }
 }
 
 #[tauri::command]

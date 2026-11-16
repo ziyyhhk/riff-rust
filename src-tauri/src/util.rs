@@ -151,7 +151,14 @@ pub fn resolve_binary(name: &str) -> Option<PathBuf> {
     }
 
     for candidate in candidates {
-        if candidate.is_file() {
+        // A truncated 0-byte binary from a failed copy used to count as
+        // "installed" and every yt-dlp call failed at spawn. Require a real
+        // payload before trusting the path.
+        let usable = candidate
+            .metadata()
+            .map(|meta| meta.is_file() && meta.len() >= 65_536)
+            .unwrap_or(false);
+        if usable {
             return Some(candidate);
         }
     }

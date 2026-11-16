@@ -303,9 +303,14 @@ fn playable_ext(ext: &str) -> bool {
 }
 
 /// Cache file ids go into file paths; keep them to a conservative charset.
+/// Ids used internally may carry `local_`/`sc`/`alb_` prefixes plus a hex or
+/// 12-char tag, which exceeds the old 16-char cap and silently disabled the
+/// MP3 transcode lane for local imports.
+const MAX_CACHE_ID_LEN: usize = 64;
+
 fn is_valid_cache_id(id: &str) -> bool {
     !id.is_empty()
-        && id.len() <= 16
+        && id.len() <= MAX_CACHE_ID_LEN
         && id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
@@ -330,7 +335,22 @@ fn write_cache_file(tmp: &std::path::Path, target: &std::path::Path) -> bool {
     if fs::rename(tmp, target).is_ok() {
         return true;
     }
-    let ok = fs::copy(tmp, target).is_ok();
+    // Cross-volume or ACL-restricted directories refuse `rename` across mount
+    // points; copy to a staging file and then rename into place so no reader
+    // ever sees a half-written MP3 at the final path.
+    let staging = target.with_extension(format!(
+        "part-{}-{}",
+        std::process::id(),
+        rand::random::<u64>()
+    ));
+    let ok = fs::copy(tmp, &staging)
+        .and_then(|_| fs::rename(&staging, target))
+        .map(|_| true)
+        .unwrap_or(false);
+    if !ok {
+        let _ = fs::remove_file(&staging);
+        let _ = fs::remove_file(target);
+    }
     let _ = fs::remove_file(tmp);
     ok
 }
@@ -566,24 +586,57 @@ fn ffmpeg_transcode_to_mp3(ffmpeg: &std::path::Path, input: &str, tmp: &std::pat
         .arg("mp3")
         .arg(tmp);
     util::hide_console(&mut cmd);
-    match cmd.output() {
-        Ok(out) => {
-            if out.status.success() {
-                true
-            } else {
-                let tail: String = String::from_utf8_lossy(&out.stderr)
-                    .lines()
-                    .last()
-                    .unwrap_or("")
-                    .chars()
-                    .take(200)
-                    .collect();
-                util::log_line("WARN", &format!("ffmpeg transcode failed: {tail}"));
-                false
-            }
-        }
+    let child = match cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
         Err(e) => {
             util::log_line("WARN", &format!("ffmpeg spawn failed: {e}"));
+            return false;
+        }
+    };
+    // Do NOT block forever: a corrupt input (e.g. a 256 KB-capped iOS URL)
+    // can hang ffmpeg while the single-flight slot stays held.
+    let started = Instant::now();
+    let mut child_handle = child;
+    let status = loop {
+        match child_handle.try_wait() {
+            Ok(Some(status)) => break Ok(status),
+            Ok(None) => {
+                if started.elapsed() > Duration::from_secs(90) {
+                    let _ = child_handle.kill();
+                    let _ = child_handle.wait();
+                    break Err("ffmpeg timed out".to_string());
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => {
+                let _ = child_handle.kill();
+                break Err(format!("ffmpeg wait failed: {e}"));
+            }
+        }
+    };
+    let ok = match status {
+        Ok(status) => status.success(),
+        Err(reason) => {
+            util::log_line("WARN", &format!("ffmpeg transcode aborted: {reason}"));
+            false
+        }
+    };
+    if !ok {
+        return false;
+    }
+    // A 0-byte or absent file must not be published into the playback cache.
+    match fs::metadata(tmp) {
+        Ok(meta) if meta.len() >= 1024 => true,
+        Ok(_) => {
+            util::log_line("WARN", "ffmpeg produced a tiny or empty file; refusing to cache it");
+            false
+        }
+        Err(_) => {
+            util::log_line("WARN", "ffmpeg produced no output file");
             false
         }
     }
@@ -635,9 +688,10 @@ fn ensure_mp3_cached(resolved_id: &str, page_target: &str, stream_url: &str) -> 
         Some(guard) => guard,
         None => {
             // Another worker owns this id. Wait for it rather than start a
-            // competing 10-30 s download; give up after ~20 s and let the
-            // caller fall back to streaming.
-            for _ in 0..200 {
+            // competing download (the winner takes ~10-30 s worst case, far
+            // more than the old 20 s timeout that forced players to fall back
+            // to an undecodable stream).
+            for _ in 0..600 {
                 if target.is_file() {
                     return Some(target);
                 }
@@ -1797,6 +1851,15 @@ async fn offline_library(State(_state): State<Shared>) -> Response {
             }
             let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
             let ext = path.extension().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "mp3".into());
+            // Never surface in-flight transcode/download temp files as tracks.
+            if stem.contains(".part-")
+                || stem.contains(".ytdl-")
+                || stem.contains(".ranged.m4a-")
+                || stem.contains(".download-")
+                || stem.contains(".mp3.part-")
+            {
+                continue;
+            }
             let size = path.metadata().map(|m| m.len()).unwrap_or(0);
             total_bytes += size;
             out.push(json!({
@@ -2040,7 +2103,13 @@ async fn net_check(State(state): State<Shared>) -> Response {
         .get("https://www.youtube.com")
         .send()
         .await
-        .map(|r| r.status().is_success() || r.status().as_u16() < 500)
+        .map(|r| {
+            let status = r.status().as_u16();
+            let final_host = r.url().host_str().unwrap_or("").to_ascii_lowercase();
+            // Captive portals answer 200 with a login page — only trust real
+            // YouTube responses.
+            status < 400 && (final_host.ends_with("youtube.com") || final_host.ends_with("google.com"))
+        })
         .unwrap_or(false);
     let latency = started.elapsed().as_millis();
     json_ok(json!({ "success": true, "online": ok, "latencyMs": latency }))
@@ -2118,7 +2187,7 @@ async fn image_proxy(State(state): State<Shared>, Query(q): Query<HashMap<String
         return json_err(StatusCode::BAD_REQUEST, "invalid url");
     }
     let referer = qp(&q, "referer");
-    let client = http_client(&state);
+    let client = state.streaming_http();
     let mut req = client.get(&url);
     if !referer.is_empty() {
         req = req.header("Referer", referer.clone());
@@ -2156,7 +2225,7 @@ async fn audio_proxy(State(state): State<Shared>, Query(q): Query<HashMap<String
     if !url.starts_with("https://") && !url.starts_with("http://") {
         return json_err(StatusCode::BAD_REQUEST, "invalid url");
     }
-    let client = http_client(&state);
+    let client = state.streaming_http();
     let mut out_req = client.get(&url);
     if let Some(range) = req.headers().get(axum::http::header::RANGE) {
         out_req = out_req.header(reqwest::header::RANGE, range.clone());

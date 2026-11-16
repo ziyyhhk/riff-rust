@@ -76,9 +76,10 @@ fn apply_offset(text: &str, offset_ms: f64) -> String {
             let ts = parse_lrc_ts(&line[1..end]);
             let Some(t) = ts else { return line.to_string() };
             let new_t = (t + offset_ms / 1000.0).max(0.0);
-            let mins = (new_t / 60.0).floor() as u64;
-            let secs = (new_t - mins as f64 * 60.0).floor() as u64;
-            let centis = ((new_t - (mins * 60 + secs) as f64) * 100.0).round() as u64;
+            let total_centis = (new_t * 100.0).round() as i64;
+            let mins = total_centis / 6000;
+            let secs = (total_centis % 6000) / 100;
+            let centis = total_centis % 100;
             format!("[{mins:02}:{secs:02}.{centis:02}]{}", &line[end + 1..])
         })
         .collect::<Vec<_>>()
@@ -154,11 +155,6 @@ pub async fn lyrics(state: &Arc<crate::state::AppState>, q: &HashMap<String, Str
     let title_q = if title.is_empty() { artist.clone() } else { title.clone() };
     let cache_key = format!("lyrics:{}|{}", artist_q.to_lowercase(), title_q.to_lowercase());
     if let Some(cached) = cache_get(&state.lyrics_cache, &cache_key, Duration::from_secs(LRCLIB_CACHE_TTL_SECS)) {
-        if cached.as_str().and_then(|s| s.parse::<u8>().ok()).is_some()
-            && cached.as_str() == Some("")
-        {
-            return json!({ "success": false, "error": "no lyrics found", "lyrics": "" });
-        }
         return lyrics_payload(LrcHit {
             lyrics: cached.as_str().unwrap_or_default().to_string(),
             is_explicit: false,
@@ -194,8 +190,8 @@ pub async fn lyrics(state: &Arc<crate::state::AppState>, q: &HashMap<String, Str
                 if let Ok(items) = resp.json::<Vec<Value>>().await {
                     let pick = items
                         .iter()
-                        .find(|i| i.get("instrumental").and_then(Value::as_bool) != Some(true))
-                        .or_else(|| items.first())
+                        .filter(|i| i.get("instrumental").and_then(Value::as_bool) != Some(true))
+                        .max_by_key(|i| lrc_match_score(i, &title_q, &artist_q, duration))
                         .cloned();
                     if let Some(item) = pick {
                         if let Some(lyrics) = item_lrc(&item) {
@@ -237,15 +233,68 @@ pub async fn lyrics(state: &Arc<crate::state::AppState>, q: &HashMap<String, Str
         }
     }
 
-    // Cache the negative result so quick successive skips do not hammer LRCLIB.
-    cache_put(
-        &state.lyrics_cache,
-        cache_key,
-        Value::String(String::new()),
-        256,
-        Duration::from_secs(WORD_NEGATIVE_TTL_SECS),
-    );
+    // Misses are not cached: a transient blip used to be remembered as
+    // "no lyrics" for 24 h and skipped retries forever.
     json!({ "success": false, "error": "no lyrics found", "lyrics": "" })
+}
+
+/// Rank-LRCLIB-candidates by how likely they are to be the same recording as
+/// the one being played. A plain first-hit pick can bind the wrong remaster
+/// or cover; penalize covers/karaoke hard (same rules as `best_search_hit`).
+fn lrc_norm(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+fn lrc_match_score(item: &Value, title: &str, artist: &str, duration: Option<f64>) -> i32 {
+    let want_title = lrc_norm(title);
+    let title_prefix: String = want_title.chars().take(12).collect();
+    let want_artist = lrc_norm(artist);
+    let item_title = item
+        .get("trackName")
+        .or_else(|| item.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let item_artist = item
+        .get("artistName")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let hit_title = lrc_norm(item_title);
+    let hit_artist = lrc_norm(item_artist);
+    let mut score = 0;
+
+    if !want_title.is_empty() && !hit_title.is_empty()
+        && (hit_title.contains(&want_title)
+            || want_title.contains(&hit_title)
+            || (!title_prefix.is_empty() && hit_title.contains(&title_prefix)))
+    {
+        score += 4;
+    }
+    if !want_artist.is_empty() && !hit_artist.is_empty()
+        && (hit_artist.contains(&want_artist) || want_artist.contains(&hit_artist))
+    {
+        score += 3;
+    }
+
+    let lower = item_title.to_lowercase();
+    let wanted_lower = title.to_lowercase();
+    for bad in ["cover", "karaoke", "instrumental", "nightcore", "sped up", "slowed", "reverb", "8d", "remix"] {
+        if lower.contains(bad) && !wanted_lower.contains(bad) {
+            score -= 6;
+        }
+    }
+
+    if let (Some(want_dur), Some(item_dur)) =
+        (duration, item.get("duration").and_then(Value::as_f64))
+    {
+        if (item_dur - want_dur).abs() > 20.0 {
+            score -= 8;
+        }
+    }
+    score
 }
 
 fn item_lrc(item: &Value) -> Option<String> {
@@ -277,8 +326,8 @@ fn adjust_and_tag(raw: &str) -> String {
 
 // ----------------------------------------------------------------- words
 
-const NETEASE_SEARCH: &str = "http://music.163.com/api/search/get/web?type=1&limit=5&s=";
-const NETEASE_LYRIC: &str = "http://music.163.com/api/song/lyric";
+const NETEASE_SEARCH: &str = "https://music.163.com/api/search/get/web?type=1&limit=5&s=";
+const NETEASE_LYRIC: &str = "https://music.163.com/api/song/lyric";
 
 pub async fn lyrics_words(state: &Arc<crate::state::AppState>, q: &HashMap<String, String>) -> Value {
     let title = q.get("title").map(|s| s.trim().to_string()).unwrap_or_default();
@@ -375,7 +424,14 @@ fn parse_yrc(text: &str) -> Vec<Value> {
         let header = &raw[..line_end];
         let Some(ts) = header.strip_prefix('[') else { continue };
         let mut ts_parts = ts.split(',');
-        let Some(start_ms) = ts_parts.next().and_then(|s| s.trim().parse::<f64>().ok()) else { continue };
+        let start_raw = ts_parts.next().map(str::trim).unwrap_or("");
+        let start_ms = if let Ok(ms) = start_raw.parse::<f64>() {
+            ms // NetEase enhanced YRC: milliseconds
+        } else if let Some(secs) = parse_lrc_ts(start_raw) {
+            secs * 1000.0 // plain LRC: mm:ss(.xx)
+        } else {
+            continue;
+        };
         let end_ms = ts_parts.next().and_then(|s| s.trim().parse::<f64>().ok()).unwrap_or(start_ms + 4000.0);
         let content = raw[line_end + 1..].trim();
         if content.is_empty() {

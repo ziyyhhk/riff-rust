@@ -1,6 +1,6 @@
 [package]
 name = "riff-rust"
-version = "0.1.14"
+version = "0.1.15"
 description = "Riff Rust - a fast, low-memory desktop music player, rebuilt in Rust"
 authors = ["rootscripts", "Riff Rust contributors"]
 edition = "2021"
@@ -11,7 +11,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 futures-util = "0.3"
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }

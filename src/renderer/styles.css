@@ -8573,8 +8573,10 @@ body.mini.mini-lyrics-on #btn-mini-lyrics {
   margin-bottom: 8px !important;
 }
 #view-settings #settings-nav-account.settings-account-nav-btn {
-  position: sticky !important;
-  bottom: 0 !important;
+  /* Was position: sticky; bottom: 0; which collapsed onto About/Advanced on
+     this layout. A plain in-flow item scrolls with the rest and never sits
+     on top of the buttons above it. */
+  position: static !important;
   z-index: 5 !important;
   flex-shrink: 0 !important;
 }

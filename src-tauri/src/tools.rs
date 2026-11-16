@@ -161,7 +161,12 @@ fn download_with_progress(
 fn find_file(dir: &Path, names: &[&str]) -> Option<PathBuf> {
     let mut stack = vec![dir.to_path_buf()];
     while let Some(current) = stack.pop() {
-        for entry in fs::read_dir(&current).ok()? {
+        // One unreadable subdirectory (ACL-restricted) must not abort the whole
+        // search — skip it and keep walking.
+        let Ok(entries) = fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries {
             let Ok(entry) = entry else { continue };
             let path = entry.path();
             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);

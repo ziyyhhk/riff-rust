@@ -63,6 +63,20 @@
     isWindows: isWin,
     platform,
     getServerPort: () => Promise.resolve(boot.port || 0),
+    toAssetUrl: (path) => {
+      // Rewrite Windows paths to asset:// URLs the Tauri asset protocol serves.
+      const core = tauri && tauri.core;
+      if (core && typeof core.convertFileSrc === 'function' && path) {
+        try {
+          return core.convertFileSrc(String(path));
+        } catch (_) {}
+      }
+      if (path) {
+        const normalized = String(path).replace(/\\/g, '/');
+        return 'file:///' + normalized.replace(/^([a-zA-Z]:)/, '$1');
+      }
+      return '';
+    },
 
     // --- window chrome ---
     minimizeWindow: () => invoke('window_minimize'),
@@ -80,7 +94,14 @@
     // --- file dialogs (driven by the dialog plugin's JS API) ---
     pickMedia: async () => {
       const files = await pickFiles({ filters: [{ name: 'Media', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm'] }] });
-      return files ? 'file://' + encodeURI(files[0]).replace(/\\/g, '/') : null;
+      if (!files || files.length === 0) return null;
+      const core = tauri && tauri.core;
+      if (core && typeof core.convertFileSrc === 'function') {
+        try {
+          return core.convertFileSrc(files[0]);
+        } catch (_) {}
+      }
+      return 'file://' + encodeURI(files[0]).replace(/\\/g, '/');
     },
     importAudioFiles: async () => {
       const files = await pickFiles({ multiple: true, filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'flac', 'opus', 'ogg', 'oga', 'm4a', 'aac', 'webm', 'weba'] }] });
@@ -139,7 +160,7 @@
     getDataDir: () => invoke('get_data_dir'),
     setDataDir: (dir, move) => invoke('set_data_dir', { dir, moveFiles: !!move }),
     getDownloadDir: () => invoke('get_download_dir'),
-    setDownloadDir: (dir) => invoke('set_download_dir', { dir }),
+    setDownloadDir: (dir) => invoke('set_download_dir', { dir, reset: false }),
     resetDownloadDir: () => invoke('set_download_dir', { reset: true }),
 
     // --- app ---

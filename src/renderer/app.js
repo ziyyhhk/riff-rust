@@ -1752,7 +1752,8 @@ const HomeCache = {
     try {
       if (window.electronAPI && window.electronAPI.readCacheFile) {
         const disk = await window.electronAPI.readCacheFile();
-        if (disk && typeof disk === 'object') this.store = disk;
+        const parsed = (typeof disk === 'string') ? JSON.parse(disk) : disk;
+        if (parsed && typeof parsed === 'object') this.store = parsed;
       }
     } catch (_) {}
   },
@@ -6601,8 +6602,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     banner.style.display = '';
     const bannerImg = banner.querySelector('.banner-image') || banner;
-    const globalMedia = localStorage.getItem('riff_banner_media');
-    const mediaToUse = trackBanner || globalMedia || thumbUrl;
+    const globalMedia = toMediaUrl(localStorage.getItem('riff_banner_media'));
+    const mediaToUse = toMediaUrl(trackBanner) || globalMedia || thumbUrl;
 
     const hasCustomFx = !!(trackArt.bannerCustomFx || (trackArt.bannerFx && trackArt.bannerFx.enabled));
     if (hasCustomFx) {
@@ -6986,7 +6987,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     banner.style.display = '';
     const bannerImg = banner.querySelector('.banner-image') || banner;
-    const globalMedia = localStorage.getItem('riff_banner_media');
+    const globalMedia = toMediaUrl(localStorage.getItem('riff_banner_media'));
     const mediaToUse = globalMedia || thumbUrl;
 
     if (!mediaToUse) {
@@ -20169,6 +20170,30 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
     return src;
   }
 
+  // User-picked media (avatar, banner) may be stored as file:// URLs written by
+  // older builds. WebView2 refuses to render file:// from the tauri.localhost
+  // origin, so convert both the legacy file:// form and plain paths into
+  // asset:// URLs served by the Tauri asset protocol.
+  function toMediaUrl(stored) {
+    if (!stored || typeof stored !== 'string') return '';
+    const trimmed = stored.trim();
+    if (!trimmed) return '';
+    if (trimmed.startsWith('asset://') || /^https?:\/\//i.test(trimmed) || trimmed.startsWith('data:')) return trimmed;
+    let path = trimmed;
+    if (trimmed.startsWith('file://')) {
+      try { path = decodeURIComponent(trimmed.replace(/^file:\/\/\/?/, '')); } catch (_) { path = trimmed.replace(/^file:\/\//, ''); }
+      if (/^[a-zA-Z]:[\\/]/.test(path)) path = path.replace(/\\/g, '/');
+      else if (path.startsWith('/')) path = path.slice(1);
+    }
+    if (window.electronAPI && typeof window.electronAPI.toAssetUrl === 'function') {
+      try {
+        const url = window.electronAPI.toAssetUrl(path);
+        if (url) return url;
+      } catch (_) {}
+    }
+    return trimmed;
+  }
+
   function getTrackThumbUrl(track) {
     if (!track) return '';
     const o = getTrackArt(track).cover;
@@ -30013,7 +30038,12 @@ function bindCoverHoldZoom(wrapEl) {
       applyCustomStyles();
       return;
     }
-    customThemes = await window.electronAPI.listThemes();
+    try {
+      customThemes = (await window.electronAPI.listThemes()) || [];
+    } catch (err) {
+      console.warn('loadCustomThemes IPC failed:', err);
+      customThemes = customThemes || [];
+    }
     applyCustomStyles();
   }
 
@@ -30181,16 +30211,24 @@ function bindCoverHoldZoom(wrapEl) {
   }
   async function loadPlugins() {
     if (!window.electronAPI || !window.electronAPI.listPlugins) return;
-    pluginsCache = await window.electronAPI.listPlugins();
-    pluginsCache.filter((p) => p.enabled).forEach(runPlugin);
-    renderPluginCards();
+    try {
+      pluginsCache = (await window.electronAPI.listPlugins()) || [];
+      pluginsCache.filter((p) => p && p.enabled).forEach(runPlugin);
+      renderPluginCards();
+    } catch (err) {
+      console.warn('loadPlugins IPC failed:', err);
+    }
   }
   const pluginsApi = window.electronAPI;
   async function reloadPluginsList() {
     if (pluginsApi && pluginsApi.listPlugins) {
-      pluginsCache = await pluginsApi.listPlugins();
-      const present = new Set(pluginsCache.map((x) => x.file));
-      [...loadedPlugins.keys()].filter((f) => !present.has(f)).forEach((f) => stopPlugin({ file: f, name: f }, true));
+      try {
+        pluginsCache = (await pluginsApi.listPlugins()) || [];
+        const present = new Set(pluginsCache.map((x) => x.file));
+        [...loadedPlugins.keys()].filter((f) => !present.has(f)).forEach((f) => stopPlugin({ file: f, name: f }, true));
+      } catch (err) {
+        console.warn('reloadPluginsList IPC failed:', err);
+      }
     }
     renderPluginCards();
   }
@@ -30200,7 +30238,7 @@ function bindCoverHoldZoom(wrapEl) {
     document.getElementById('btn-add-plugin').addEventListener('click', async () => {
       const added = await pluginsApi.importPlugins();
       if (!added) return;
-      pluginsCache = await pluginsApi.listPlugins();
+      pluginsCache = (await pluginsApi.listPlugins()) || [];
       renderPluginCards();
       showToast(`Added ${added} plugin${added > 1 ? 's' : ''}. Turn one on to run it`, 'info');
     });
@@ -31624,7 +31662,10 @@ function bindCoverHoldZoom(wrapEl) {
 
         try {
           const r = await api.checkForUpdates();
-          if (r && r.ok === false) {
+          // The port returns { available: false } and never kicks off a real
+          // check. Fall back to the direct-renderer check immediately instead
+          // of leaving the spinner dead for 6 s.
+          if (!r || r.available !== true) {
             if (checkTimeoutId) clearTimeout(checkTimeoutId);
             checkDirectFromRenderer();
           }
@@ -32052,6 +32093,37 @@ function bindCoverHoldZoom(wrapEl) {
   const btnDiscordRpc = document.getElementById('btn-discord-rpc');
   const badgeDiscordRpc = document.getElementById('badge-discord-rpc');
 
+  const rpcCard = document.getElementById('card-discord-rpc');
+  let discordRpcStatusEl = null;
+  function ensureDiscordRpcStatus() {
+    if (discordRpcStatusEl || !rpcCard) return;
+    discordRpcStatusEl = document.createElement('div');
+    discordRpcStatusEl.id = 'discord-rpc-status';
+    discordRpcStatusEl.style.cssText = 'font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline); margin-top: 8px; width: 100%;';
+    rpcCard.appendChild(discordRpcStatusEl);
+  }
+  async function refreshDiscordRpcStatus() {
+    ensureDiscordRpcStatus();
+    if (!discordRpcStatusEl || !window.electronAPI) return;
+    try {
+      const enabled = await (window.electronAPI.discordRpcGetEnabled ? window.electronAPI.discordRpcGetEnabled() : Promise.resolve(state.discordRpcEnabled));
+      let connected = false;
+      if (enabled && window.electronAPI.discordRpcGetConnected) {
+        connected = await window.electronAPI.discordRpcGetConnected();
+      }
+      discordRpcStatusEl.textContent = enabled
+        ? (connected
+            ? 'Connected — playing tracks will show as your Discord activity'
+            : 'Discord not reachable — open the Discord desktop app, then press Reconnect')
+        : 'Disabled';
+      discordRpcStatusEl.style.color = connected
+        ? 'var(--md-sys-color-primary)'
+        : 'var(--md-sys-color-outline)';
+    } catch (_) {}
+  }
+  refreshDiscordRpcStatus();
+  setInterval(refreshDiscordRpcStatus, 2500);
+
   function syncDiscordRpcUI() {
     if (btnDiscordRpc) {
       btnDiscordRpc.classList.toggle('active', state.discordRpcEnabled);
@@ -32062,6 +32134,7 @@ function bindCoverHoldZoom(wrapEl) {
     }
     const card = document.getElementById('card-discord-rpc');
     if (card) card.classList.toggle('enabled', state.discordRpcEnabled);
+    refreshDiscordRpcStatus();
   }
 
   if (btnDiscordRpc) {
@@ -32087,6 +32160,7 @@ function bindCoverHoldZoom(wrapEl) {
           sendDiscordRpcUpdate(state.currentTrack, true);
         }
         showToast('Discord RPC reconnected', 'info');
+        refreshDiscordRpcStatus();
       }
     });
   }
@@ -34156,8 +34230,13 @@ function bindCoverHoldZoom(wrapEl) {
           showToast('Signed in to YouTube!', 'success');
           return;
         }
+        // The port reports { success: false, error: '… not yet ported …' } instead of
+        // loggedIn; say something rather than silently reverting the status line.
+        const reason = (res && res.error) ? res.error : 'Google sign-in is not available in this build of Riff';
+        if (typeof showToast === 'function') showToast(reason, 'error');
       } catch (err) {
         console.warn('Google login error:', err);
+        if (typeof showToast === 'function') showToast('Google sign-in failed — check your connection', 'error');
       }
       await checkGoogleAuthStatus();
       checkYoutubePlaybackAuthStatus();
@@ -34855,8 +34934,10 @@ function bindCoverHoldZoom(wrapEl) {
       if (res && res.success) {
         const count = valid.length;
         if (typeof showToast === 'function') {
-          showToast(`Exported ${count} playlist${count === 1 ? '' : 's'}`, 'success');
+          showToast(res.path ? `Exported ${count} playlist${count === 1 ? '' : 's'} to ${res.path}` : `Exported ${count} playlist${count === 1 ? '' : 's'}`, 'success');
         }
+      } else if (res && res.error) {
+        if (typeof showToast === 'function') showToast(`Export failed: ${res.error}`, 'error');
       }
     }
   }
@@ -35533,7 +35614,7 @@ function bindCoverHoldZoom(wrapEl) {
 
   function syncLocalAccountUI() {
     const nick = (localStorage.getItem('riff_user_nickname') || '').trim() || 'User';
-    const avatar = (localStorage.getItem('riff_user_avatar') || '').trim() || DEFAULT_USER_AVATAR;
+    const avatar = toMediaUrl((localStorage.getItem('riff_user_avatar') || '').trim()) || DEFAULT_USER_AVATAR;
     const navName = document.getElementById('settings-nav-account-name');
     const nickInput = document.getElementById('account-nickname-input');
     const navAvatar = document.getElementById('settings-nav-avatar');
@@ -40056,7 +40137,7 @@ function bindCoverHoldZoom(wrapEl) {
       } catch (e) {
         res = { ok: false, error: e.message };
       }
-      if (!res || !res.ok) {
+      if (!res || (!res.ok && res.success !== true)) {
         showToast((res && res.error) || 'Could not change the music folder', 'error');
         btnChangeMusicFolder.disabled = false;
         btnChangeMusicFolder.textContent = originalLabel;
@@ -40110,7 +40191,7 @@ function bindCoverHoldZoom(wrapEl) {
         res = { ok: false, error: e.message };
       }
       btnChangeDownloadFolder.disabled = false;
-      if (!res || !res.ok) {
+      if (!res || res.success === false) {
         showToast((res && res.error) || 'Could not change the download folder', 'error');
         return;
       }
@@ -40133,7 +40214,7 @@ function bindCoverHoldZoom(wrapEl) {
         res = { ok: false, error: e.message };
       }
       btnResetDownloadFolder.disabled = false;
-      if (!res || !res.ok) {
+      if (!res || res.success === false) {
         showToast((res && res.error) || 'Could not reset the download folder', 'error');
         return;
       }
@@ -40704,7 +40785,7 @@ function bindCoverHoldZoom(wrapEl) {
     const bannerVid = document.getElementById('track-art-banner-vid');
     const bannerPh = document.getElementById('track-art-banner-placeholder');
     const bannerStatus = document.getElementById('track-art-banner-status');
-    const activeBanner = art.banner || localStorage.getItem('riff_banner_media') || activeCover;
+    const activeBanner = toMediaUrl(art.banner) || toMediaUrl(localStorage.getItem('riff_banner_media')) || toMediaUrl(activeCover);
     const isVideo = activeBanner && /\.(mp4|webm)($|\?)/i.test(activeBanner);
 
     if (activeBanner) {
@@ -41529,7 +41610,7 @@ function bindCoverHoldZoom(wrapEl) {
           btn.disabled = true;
           btn.textContent = 'Creating...';
           const res = await window.electronAPI.installLauncher();
-          if (res && res.ok) {
+          if (res && (res.ok || res.success)) {
             showToast('Shortcut created on Desktop & App Menu', 'success');
           } else {
             showToast('Failed to create shortcut: ' + ((res && res.error) || 'unknown error'), 'error');
