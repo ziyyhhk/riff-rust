@@ -8622,15 +8622,23 @@ input[type="range"].pill-range::-moz-range-thumb {
   margin-bottom: 8px !important;
 }
 #view-settings #settings-nav-account.settings-account-nav-btn {
-  /* Was position: sticky; bottom: 0; which collapsed onto About/Advanced on
-     this layout. A plain in-flow item scrolls with the rest and never sits
-     on top of the buttons above it. */
-  position: static !important;
+  /* position: relative is load bearing here, not a detail. Every button in
+     the app gets an invisible ::after hit extension anchored to its nearest
+     positioned ancestor. With position: static (and .settings-nav at
+     position: relative) the account button's ::after stretched to the whole
+     nav and swallowed every click meant for the category buttons, opening
+     Account instead. Anchor it to itself like every other button. */
+  position: relative !important;
   z-index: 5 !important;
   flex-shrink: 0 !important;
 }
 #view-settings #settings-nav-account.settings-account-nav-btn:not(.active) {
   background-color: transparent !important;
+}
+/* Belt and braces: any button in the nav anchors its invisible ::after
+   extension to itself, never to the nav container. */
+#view-settings .settings-nav button {
+  position: relative !important;
 }
 #view-settings .settings-pane {
   flex: 1 1 auto;
