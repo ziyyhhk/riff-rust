@@ -293,6 +293,30 @@ fn reader_loop(shared: Arc<Mutex<Shared>>, connected: Arc<AtomicBool>) {
 }
 
 fn activity_from(value: &Value) -> Value {
+    // Non-playing presence: "Riff Rust — Browsing X" / "Searching songs" etc.
+    // The renderer sends this instead of a track activity when nothing plays.
+    if value.get("mode").and_then(Value::as_str) == Some("browsing") {
+        let details = value.get("details").and_then(Value::as_str).unwrap_or("Riff Rust").chars().take(128).collect::<String>();
+        let mut activity = json!({ "type": 0, "details": details, "instance": false });
+        if let Some(state) = value.get("state").and_then(Value::as_str) {
+            if !state.is_empty() {
+                activity["state"] = json!(state.chars().take(128).collect::<String>());
+            }
+        }
+        if let Some(thumb) = value.get("thumbnail").and_then(Value::as_str) {
+            if thumb.starts_with("https://") {
+                activity["assets"] = json!({ "large_image": thumb });
+            }
+        }
+        if let Some(url) = value.get("url").and_then(Value::as_str) {
+            if url.starts_with("https://") && url.len() <= 512 {
+                activity["buttons"] = json!([{ "label": "Open Riff Rust", "url": url }]);
+            }
+        }
+        activity["status_display_type"] = json!(1);
+        return activity;
+    }
+
     let title = match value.get("title").and_then(Value::as_str) {
         Some(t) if t.chars().count() >= 2 => t.chars().take(128).collect::<String>(),
         Some(t) => format!("{t} ").chars().take(2).collect(),

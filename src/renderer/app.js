@@ -1447,6 +1447,15 @@ document.body.classList.toggle('home-next-to-search', homeNextToSearch);
       body.app-paused .cover-bg-blob {
         animation-play-state: paused !important;
       }
+      body.app-paused .home-ambient-layer,
+      body.app-paused .tvk-ambient-layer,
+      body.app-paused .tvk-ambient-blob,
+      body.app-paused .cover-bg-blob,
+      body.unfocused .cover-bg-blob,
+      body.unfocused .tvk-ambient-blob,
+      body.unfocused .home-ambient-layer {
+        animation-play-state: paused !important;
+      }
       body.cover-bg-on :is(.np-queue-panel, #rail-drawer, .rail-drawer, .audio-menu-card.connected-editor, .m3-dropdown-menu, .riff-ctx-menu, #view-settings .settings-view) {
         backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
         -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
@@ -2602,10 +2611,49 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.electronAPI.discordRpcSetEnabled(state.discordRpcEnabled);
   }
 
+  const DISCORD_ICON_URL = 'https://raw.githubusercontent.com/ziyyhhk/riff-rust/main/readme-hero.png';
+  const DISCORD_VIEW_LABELS = {
+    discover: 'Browsing the home page',
+    favorites: 'Browsing Liked songs',
+    albums: 'Browsing albums',
+    local: 'Browsing the local library',
+    history: 'Browsing playback history',
+    queue: 'Browsing the queue',
+    'playlist-detail': 'Viewing a playlist',
+    album: 'Viewing an album',
+    artist: 'Viewing an artist',
+    settings: 'In the settings',
+  };
+
+  function sendBrowsingPresence(page, detail) {
+    if (state.isPlaying && state.currentTrack) return; // Track presence wins while playing.
+    if (!window.electronAPI || !window.electronAPI.discordRpcUpdate) return;
+    const label = detail || (DISCORD_VIEW_LABELS[page] || 'Browsing');
+    const dedupeKey = `browsing|${label}`;
+    const nowMs = Date.now();
+    if (state._lastDiscordRpcSent === dedupeKey && nowMs - (state._lastDiscordRpcSentAt || 0) < 1500) return;
+    state._lastDiscordRpcSent = dedupeKey;
+    state._lastDiscordRpcSentAt = nowMs;
+    window.electronAPI.discordRpcUpdate({
+      mode: 'browsing',
+      details: 'Riff Rust',
+      state: label,
+      title: 'Riff Rust',
+      thumbnail: DISCORD_ICON_URL,
+      url: 'https://github.com/ziyyhhk/riff-rust',
+    });
+  }
+  window.sendBrowsingPresence = sendBrowsingPresence;
+
   function sendDiscordRpcUpdate(track, isPlaying) {
     if (!window.electronAPI || !window.electronAPI.discordRpcUpdate) return;
     if (!track || !isPlaying) {
-      if (window.electronAPI.discordRpcClear) window.electronAPI.discordRpcClear();
+      // Keep presence meaningful instead of going blank: show what the app is doing.
+      if (typeof sendBrowsingPresence === 'function' && state.currentView) {
+        sendBrowsingPresence(state.currentView);
+      } else if (window.electronAPI.discordRpcClear) {
+        window.electronAPI.discordRpcClear();
+      }
       state._lastDiscordRpcSent = '';
       state._lastDiscordRpcSentAt = 0;
       return;
@@ -15954,6 +16002,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     state.searchOffset = 0;
     state.searchHasMore = false;
     state.searchLoadingMore = false;
+    if (typeof sendBrowsingPresence === 'function') sendBrowsingPresence('discover', `Searching songs for "${String(query).trim().slice(0, 60)}"`);
     switchView('discover');
 
     if (el.discoverEmpty) el.discoverEmpty.classList.add('hidden');
@@ -21904,6 +21953,16 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
       state.previousView = state.currentView;
     }
     state.currentView = viewName;
+    if (typeof sendBrowsingPresence === 'function') {
+      let browsingLabel = '';
+      if (viewName === 'artist' && state.currentArtist) browsingLabel = `Viewing ${stripYoutubeTopic(String(state.currentArtist))}`;
+      else if (viewName === 'album' && state.currentAlbum) browsingLabel = `Viewing ${(state.currentAlbum && (state.currentAlbum.title || state.currentAlbum.name)) || 'album'}`;
+      else if (viewName === 'playlist-detail') {
+        const pl = state.currentPlaylist || (state.playlists && state.playlists.find(p => p.id === state.currentPlaylistId));
+        browsingLabel = `Viewing playlist ${(pl && (pl.name || pl.title)) || ''}`.trim();
+      }
+      sendBrowsingPresence(viewName, browsingLabel || undefined);
+    }
 
     if (pageNavHistory && !pageNavHistory.isNavigating && viewName !== 'settings') {
       if (viewName === 'playlist-detail') {
