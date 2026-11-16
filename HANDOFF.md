@@ -153,6 +153,17 @@ Release process used for v0.1.x: bump `version` in `package.json`, `src-tauri/Ca
     default, no lyric surface is visible anywhere); `riff_tvk_cover_mode` is
     reset to off once (`riff_tvk_cover_mode_reset_v1`) so lyrics reappear; the
     user can re-enable it in the overlay.
+25. Material Symbols fonts are bundled under `assets/fonts/` and referenced from
+    styles.css; the Google Fonts stylesheet link was removed. A flaky CDN used to
+    turn every icon into raw ligature text that overflowed the sidebar and sat on
+    top of clickable elements — that is what made settings/banners/profile/etc.
+    look dead on other machines.
+26. `/api/i18n-batch` is implemented (was a stub). DeepL when
+    `riff_deepl_api_key` is set (free `:fx` keys hit the free tier); otherwise
+    Google gtx with rotating mirror hosts (multi-line batch, per-line on
+    misalign), with MyMemory per-line fallback when Google throttles the
+    network (429). Language selection used to silently revert to English
+    on every miss.
 
 ## Done (see PORTING.md)
 

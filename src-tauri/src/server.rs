@@ -2653,6 +2653,265 @@ async fn playlist_import(State(state): State<Shared>, Query(q): Query<HashMap<St
     json_ok(json!({ "success": true, "name": name, "cover": cover, "tracks": tracks, "total": tracks.len() }))
 }
 
+// ------------------------------------------------------------------ i18n
+
+fn deepl_code(lang: &str) -> String {
+    let base = lang.split(['-', '_']).next().unwrap_or(lang).to_ascii_uppercase();
+    match base.as_str() {
+        "EN" => "EN".to_string(),
+        "PT" => {
+            if lang.to_ascii_lowercase().contains("pt-br") {
+                "PT-BR".to_string()
+            } else {
+                "PT-PT".to_string()
+            }
+        }
+        "ZH" => "ZH".to_string(),
+        "JA" => "JA".to_string(),
+        "UK" => "UK".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Per-line Google Translate request, used when the multi-line batch cannot be
+/// aligned. Everything captured by the future is owned, so the higher-ranked-lifetime
+/// checker stays happy inside the per-line fan-out.
+async fn google_translate_one(client: reqwest::Client, host: &'static str, target: String, text: String) -> Option<String> {
+    let url = format!(
+        "https://{host}/translate_a/single?client=gtx&sl=en&tl={}&dt=t&q={}",
+        util::percent_encode(&target),
+        util::percent_encode(&text)
+    );
+    let r = client.get(&url).send().await.ok()?;
+    if !r.status().is_success() {
+        return None;
+    }
+    let j: Value = r.json().await.ok()?;
+    j.get(0)?
+        .as_array()?
+        .first()
+        .and_then(|seg| seg.get(0))
+        .and_then(Value::as_str)
+        .map(|s| s.to_string())
+}
+
+/// Google Translate serves the same endpoint from several interchangeable hosts.
+/// If the usual host rate-limits us (429) we try the alternates before giving up.
+const GOOGLE_TRANSLATE_HOSTS: [&str; 7] = [
+    "translate.googleapis.com",
+    "translate.google.com",
+    "translate.google.de",
+    "clients5.google.com",
+    "translate.google.com.sg",
+    "translate.google.com.au",
+    "translate.google.co.in",
+];
+
+async fn google_translate_request(state: &Shared, target: &str, joined: &str) -> Option<Value> {
+    let client = http_client(state);
+    for host in GOOGLE_TRANSLATE_HOSTS {
+        let url = format!(
+            "https://{host}/translate_a/single?client=gtx&sl=en&tl={}&dt=t&q={}",
+            util::percent_encode(target),
+            util::percent_encode(joined)
+        );
+        match client.get(&url).send().await {
+            Ok(resp) => {
+                if !resp.status().is_success() {
+                    util::log_line("WARN", &format!("i18n: {host} returned status {}; trying next mirror", resp.status().as_u16()));
+                    continue;
+                }
+                match resp.json::<Value>().await {
+                    Ok(json) => {
+                        if json.get(0).is_some() {
+                            return Some(json);
+                        }
+                        util::log_line("WARN", &format!("i18n: {host} returned an unparsable body; trying next mirror"));
+                    }
+                    Err(_) => {
+                        util::log_line("WARN", &format!("i18n: {host} body parse failed; trying next mirror"));
+                    }
+                }
+            }
+            Err(e) => {
+                util::log_line("WARN", &format!("i18n: {host} request failed: {e}; trying next mirror"));
+            }
+        }
+    }
+    None
+}
+
+/// Keyless translation via MyMemory (api.mymemory.translated.net). Anonymous
+/// quota is small but the UI batch is ~300 short strings, which passes.
+/// Used when Google throttles us (gtx 429).
+async fn mymemory_translate(client: reqwest::Client, target: String, text: String) -> Option<String> {
+    let url = format!(
+        "https://api.mymemory.translated.net/get?q={}&langpair=en|{}",
+        util::percent_encode(&text),
+        util::percent_encode(&target)
+    );
+    let resp = client.get(&url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let json: Value = resp.json().await.ok()?;
+    if json.get("responseStatus").and_then(Value::as_u64) != Some(200) {
+        return None;
+    }
+    json.pointer("/responseData/translatedText")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// Google's gtx endpoint accepts a `\n`-joined batch and answers with one
+/// segment per input line, in order; the translation of every line except the
+/// last carries the trailing `\n`. Falls back to per-line requests if the
+/// segment count does not match.
+async fn google_translate_batch(
+    state: &Shared,
+    target: &str,
+    texts: &[String],
+) -> Option<Vec<String>> {
+    let joined = texts.join("\n");
+    let json = google_translate_request(state, target, &joined).await?;
+    let segs = json.get(0)?.as_array()?;
+    if segs.len() != texts.len() {
+        // Misaligned: ask line by line instead.
+        let mut out = Vec::with_capacity(texts.len());
+        let target = target.to_string();
+        let client = http_client(state);
+        let tasks: Vec<_> = texts
+            .iter()
+            .map(|text| {
+                let text = text.clone();
+                let client = client.clone();
+                let target = target.clone();
+                async move {
+                    // Each line rotates through the mirrors too.
+                    for host in GOOGLE_TRANSLATE_HOSTS {
+                        match google_translate_one(client.clone(), host, target.clone(), text.clone()).await {
+                            Some(translated) => return Some(translated),
+                            None => continue,
+                        }
+                    }
+                    // Last resort per line: MyMemory.
+                    mymemory_translate(client.clone(), target.clone(), text.clone()).await
+                }
+            })
+            .collect();
+        for translated in futures_util::stream::iter(tasks)
+            .buffered(16)
+            .collect::<Vec<_>>()
+            .await
+        {
+            out.push(translated?);
+        }
+        return Some(out);
+    }
+    Some(
+        segs.iter()
+            .map(|seg| seg.get(0).and_then(|v| v.as_str()).unwrap_or("").trim_end_matches('\n').to_string())
+            .collect(),
+    )
+}
+
+async fn i18n_batch(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let target = body
+        .get("target")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let texts: Vec<String> = body
+        .get("texts")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    if texts.is_empty() {
+        return json_ok(json!({ "success": true, "translations": [] }));
+    }
+    let api_key = body
+        .get("apiKey")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    // 1) DeepL, when the user supplied a key. Free keys (…:fx) hit the free tier.
+    if !api_key.is_empty() {
+        let url = if api_key.ends_with(":fx") {
+            "https://api-free.deepl.com/v2/translate"
+        } else {
+            "https://api.deepl.com/v2/translate"
+        };
+        let mut params: Vec<(String, String)> = texts.iter().map(|t| ("text".to_string(), t.clone())).collect();
+        params.push(("target_lang".to_string(), deepl_code(&target)));
+        params.push(("source_lang".to_string(), "EN".to_string()));
+        let client = http_client(&state);
+        match client
+            .post(url)
+            .header("Authorization", format!("DeepL-Auth-Key {api_key}"))
+            .form(&params)
+            .send()
+            .await
+        {
+            Ok(resp) => match resp.json::<Value>().await {
+                Ok(json) => {
+                    if let Some(arr) = json.get("translations").and_then(|v| v.as_array()) {
+                        let out: Vec<String> = arr
+                            .iter()
+                            .filter_map(|t| t.get("text").and_then(|v| v.as_str()).map(str::to_string))
+                            .collect();
+                        if out.len() == texts.len() {
+                            return json_ok(json!({ "success": true, "translations": out }));
+                        }
+                    }
+                }
+                Err(_) => {}
+            },
+            Err(_) => {}
+        }
+        // DeepL failed or misaligned; fall through to Google.
+    }
+
+    // 2) Google gtx (works when quota isn't throttled).
+    if let Some(translations) = google_translate_batch(&state, &target, &texts).await {
+        return json_ok(json!({ "success": true, "translations": translations }));
+    }
+
+    // 3) Last resort: MyMemory per line. Slow (roundtrip per string) but works
+    // even when Google refuses the IP.
+    let client = http_client(&state);
+    let target = target.clone();
+    let tasks: Vec<_> = texts
+        .iter()
+        .map(|text| {
+            let text = text.clone();
+            let client = client.clone();
+            let target = target.clone();
+            async move { mymemory_translate(client, target, text).await }
+        })
+        .collect();
+    let mut out: Vec<String> = Vec::with_capacity(texts.len());
+    for translated in futures_util::stream::iter(tasks)
+        .buffered(8)
+        .collect::<Vec<_>>()
+        .await
+    {
+        match translated {
+            Some(text) => out.push(text),
+            None => return json_ok(json!({ "success": false, "error": "Translation failed" })),
+        }
+    }
+    json_ok(json!({ "success": true, "translations": out }))
+}
+
 // ------------------------------------------------------------------ stubs
 
 async fn stub_unported(Query(q): Query<HashMap<String, String>>) -> Response {
@@ -2744,7 +3003,7 @@ pub fn build_router(state: Shared) -> Router {
         .route("/api/lastfm/{*rest}", get(stub_unported).post(stub_unported))
         .route("/api/lyrics-words", get(lyrics_words))
         .route("/api/translate", post(stub_unported))
-        .route("/api/i18n-batch", post(stub_unported))
+        .route("/api/i18n-batch", post(i18n_batch))
         .route("/api/devsize-memes", get(stub_unported))
         .route("/api/encode", post(stub_unported))
         .route("/api/tmp-file", get(stub_unported))
