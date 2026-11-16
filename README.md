@@ -1,13 +1,9 @@
 ﻿<p align="center">
-  <img src="banner.png" alt="Riff Rust, a desktop music player and audio suite for YouTube Music, SoundCloud, and local files" width="100%">
+  <img src="readme-hero.png" alt="Riff Rust, a desktop music player and audio suite for YouTube Music, SoundCloud, and local files" width="100%">
 </p>
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/windows8/windows8-original.svg" width="22" height="22" alt="Windows">&nbsp;&nbsp;
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/apple/apple-original.svg" width="22" height="22" alt="macOS">&nbsp;&nbsp;
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/linux/linux-original.svg" width="22" height="22" alt="Linux">&nbsp;&nbsp;
-  <img src="https://cdn.simpleicons.org/ios/9ca3af" width="22" height="22" alt="iOS">&nbsp;&nbsp;
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/android/android-original.svg" width="22" height="22" alt="Android">
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/windows8/windows8-original.svg" width="26" height="26" alt="Windows">&nbsp;&nbsp;<b>Windows</b>
 </p>
 
 <h1 align="center">
@@ -61,7 +57,7 @@
 
 ## What is Riff Rust?
 
-Riff Rust is an open source, telemetry free desktop music app and player for **Windows, Linux, and macOS**. It unifies playback across **YouTube Music**, **YouTube**, **SoundCloud**, and offline local media into a single high performance interface without ads, subscriptions, or login constraints.
+Riff Rust is an open source, telemetry free desktop music app and player for **Windows**. It unifies playback across **YouTube Music**, **YouTube**, **SoundCloud**, and offline local media into a single high performance interface without ads, subscriptions, or login constraints.
 
 Riff Rust ships no Chromium runtime. It renders in the OS WebView2 and serves a native Rust API on `127.0.0.1`, replacing the Node server and Electron shell downstream of the upstream Riff project. The result is the exact same interface, with far less RAM and CPU pressure, and a single small installer. Project code is distributed under the **MIT license**; all configuration, cached streams, and playback history remain strictly on the local machine.
 
@@ -136,29 +132,14 @@ Standard releases include all necessary dependencies (bundled yt-dlp and ffmpeg 
 
 On Windows, the installer lets you choose the installation directory. Uninstalling Riff Rust does not delete your application data.
 
-### Linux
+### What you get
 
-Linux support follows the same principles as the desktop builds. Use your distributions preferred format when one is published, or build from source below. WebView2 is replaced by the native WebKitGTK on Linux.
+* One installer for Windows 10 and 11
+* yt-dlp and ffmpeg fetched on first launch (verified by SHA-256) when you enable downloads or the audio editor
+* Material Design 3 UI with dynamic album art color, synchronized lyrics, Discord Rich Presence, and a built in equalizer and audio editor
+* Zero telemetry and zero account requirements
 
-### macOS
-
-macOS support is currently experimental and compiled via continuous integration.
-
-1. Download the appropriate disk image:
-   * `Riff-Rust-<version>-mac-arm64.dmg` for Apple Silicon (M1, M2, M3, M4)
-   * `Riff-Rust-<version>-mac-x64.dmg` for Intel based hardware
-2. Open the disk image and drag Riff Rust to your `Applications` directory.
-3. Riff Rust is ad hoc signed but not notarized, so the first launch is blocked. Right click `Riff Rust.app` in `Applications`, select **Open**, and confirm the prompt. On macOS 15 and later, open it once, then go to **System Settings â†’ Privacy and Security** and click **Open Anyway**.
-4. If macOS still flags the bundle as damaged, execute the following command in Terminal:
-   ```bash
-   xattr -cr /Applications/Riff\ Rust.app
-   ```
-5. Riff Rust uses yt-dlp for streaming. The tools are downloaded on first launch on other platforms; on macOS install them with Homebrew:
-   ```bash
-   brew install yt-dlp ffmpeg
-   ```
-
-macOS application data and local indexes are stored in `~/Library/Application Support/Riff Rust`.
+Other platforms are not published right now. Only Windows builds ship from this repository.
 
 ## Build from source
 
@@ -192,7 +173,7 @@ No. Streams from YouTube Music, YouTube, and SoundCloud are resolved directly an
 No account is required for playback or public playlist imports. Optional Google sign in lets you import your own YouTube likes and playlists; Riff Rust uses Google OAuth and the YouTube Data API for that feature. Telemetry and analytic tracking are strictly omitted.
 
 **Which operating systems are supported?**
-Windows 10 and 11, modern Linux distributions, and macOS (experimental).
+Windows 10 and 11. macOS and Linux builds are not published right now.
 
 **Can Riff Rust function as an offline local music player?**
 Yes. Riff Rust natively indexes local audio files (including lossless FLAC, WAV, MP3, and OGG), reads standard metadata tags and embedded artwork, and manages playlists without altering the underlying disk files.
