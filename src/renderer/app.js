@@ -2779,7 +2779,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const title = rawTitle || 'Unknown track';
       const artist = rawArtist || 'Unknown artist';
       const album = current.album || 'Riff';
-      const thumb = (typeof getTrackThumbUrl === 'function' ? getTrackThumbUrl(current) : '') || current.thumbnail || current.cover || '';
+      const thumb = (typeof getTrackThumbUrl === 'function' ? getTrackThumbUrl(current, 'large') : '') || current.thumbnail || current.cover || '';
       const artwork = getMediaArtwork(thumb);
       navigator.mediaSession.metadata = new MediaMetadata({
         title,
@@ -10869,7 +10869,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     if (bannerType === 'none') {
-      const thumb = getTrackThumbUrl(state.currentTrack);
+      const thumb = getTrackThumbUrl(state.currentTrack, 'large');
       if (thumb) {
         bannerType = 'fallback';
         bannerSrc = thumb;
@@ -11374,7 +11374,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const coverEl = el.tvCover || document.getElementById('tv-cover');
     if (coverEl) {
       if (typeof bindCoverHoldZoom === 'function') bindCoverHoldZoom(coverEl);
-      const thumb = getTrackThumbUrl(curTrack);
+      const thumb = getTrackThumbUrl(curTrack, 'large');
       if (thumb) {
         if (coverEl.dataset.currentThumb !== thumb) {
           coverEl.dataset.currentThumb = thumb;
@@ -14429,7 +14429,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       }
 
-      const avatarUrl = artist.avatar || (searchTracks && searchTracks[0] ? searchTracks[0].thumbnail : '');
+      const avatarUrl = compactThumbUrl(artist.avatar || (searchTracks && searchTracks[0] ? searchTracks[0].thumbnail : '')) || '';
       const fans = artist.fans || artist.nb_fan || 0;
       const label = fans > 0 ? `Artist \u2022 ${fans.toLocaleString()} listeners` : 'Artist';
       container.innerHTML = `
@@ -15716,7 +15716,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const thumb = document.createElement('div');
         thumb.className = 'sh-thumb' + (entry.kind === 'artist' ? ' round' : '');
-        const resolvedThumb = entry.thumb || (entry.track ? getTrackThumbUrl(entry.track) : '') || (entry.track && entry.track.id && !/^(cand_|dz_|it_|sp_|ym_)/i.test(entry.track.id) ? `https://i.ytimg.com/vi/${entry.track.id}/hqdefault.jpg` : '');
+        const resolvedThumb = compactThumbUrl(entry.thumb || (entry.track ? getTrackThumbUrl(entry.track) : '') || (entry.track && entry.track.id && !/^(cand_|dz_|it_|sp_|ym_)/i.test(entry.track.id) ? `https://i.ytimg.com/vi/${entry.track.id}/mqdefault.jpg` : '')) || '';
         const fallbackSvg = entry.kind === 'artist'
           ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'
           : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg>';
@@ -15732,7 +15732,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 .then(r => r.json())
                 .then(d => {
                   if (d?.artist?.avatar) {
-                    img.src = d.artist.avatar;
+                    img.src = compactThumbUrl(d.artist.avatar);
                     entry.thumb = d.artist.avatar;
                   } else img.remove();
                 }).catch(() => img.remove());
@@ -15742,7 +15742,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 .then(r => r.json())
                 .then(d => {
                   if (d?.cover) {
-                    img.src = d.cover;
+                    img.src = compactThumbUrl(d.cover);
                     entry.thumb = d.cover;
                   } else img.remove();
                 }).catch(() => img.remove());
@@ -18154,7 +18154,7 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
           if (newAvatar) {
             if (card) {
               const img = card.querySelector('.fav-artist-img');
-              if (img) img.src = newAvatar;
+              if (img) img.src = compactThumbUrl(newAvatar);
             }
             artistObj.avatar = newAvatar;
           }
@@ -18193,6 +18193,7 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
     const cached = metaCache[lower];
 
     let avatar = artistObj.avatar || (cached && cached.avatar) || '';
+    const avatarSrc = compactThumbUrl(avatar) || '';
     let fans = artistObj.fans || (cached && cached.fans) || 0;
     let plays = artistObj.plays || (cached && cached.plays) || 0;
     artistObj.avatar = avatar;
@@ -18205,7 +18206,7 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
 
     const circleHtml = `
       <div class="fav-artist-circle">
-        <img class="fav-artist-img" src="${escapeHtml(avatar)}" alt="${escapeHtml(artistObj.name)}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'152\\' height=\\'152\\' fill=\\'%23333\\'><circle cx=\\'76\\' cy=\\'76\\' r=\\'76\\' fill=\\'%232a2a2a\\'/></svg>'">
+        <img class="fav-artist-img" src="${escapeHtml(avatarSrc)}" alt="${escapeHtml(artistObj.name)}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'152\\' height=\\'152\\' fill=\\'%23333\\'><circle cx=\\'76\\' cy=\\'76\\' r=\\'76\\' fill=\\'%232a2a2a\\'/></svg>'">
         <div class="fav-artist-plays"><svg viewBox="0 0 24 24"><polygon points="6 4 20 12 6 20 6 4"/></svg><span>${escapeHtml(playText)}</span></div>
         <div class="fav-artist-hover">
           <button type="button" class="fav-artist-action-btn primary btn-play-fav" title="Play ${escapeHtml(artistObj.name)}">
@@ -20262,18 +20263,44 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
     return trimmed;
   }
 
-  function getTrackThumbUrl(track) {
+  const THUMB_MEMORY_CAP = 256;
+
+  // Remote CDNs let us ask for a smaller render of the same artwork. Decoded
+  // image pixels are the biggest chunk of the renderer's memory, so lists and
+  // small cards request a screen-sized copy instead of the 500px+ original.
+  // User-picked art (asset://, data:, blob:) is never touched.
+  function compactThumbUrl(url, cap = THUMB_MEMORY_CAP) {
+    if (!url || typeof url !== 'string') return url;
+    if (/^(asset|data|blob|file):/i.test(url) || /(?:127\.0\.0\.1|localhost)/i.test(url)) return url;
+    if (url.includes('yt3.googleusercontent.com/')) {
+      return url.replace(/=w\d+-h\d+/i, `=w${cap}-h${cap}`).replace(/=s\d+/i, `=s${cap}`);
+    }
+    if (url.includes('ytimg.com/vi/') || url.includes('img.youtube.com/vi/')) {
+      return url.replace(/\/(?:maxres|sd|hq)default\.jpg/i, '/mqdefault.jpg');
+    }
+    if (url.includes('cdn-images.dzcdn.net/')) {
+      return url.replace(/\/\d{3,4}x\d{3,4}-/, '/250x250-');
+    }
+    if (url.includes('sndcdn.com/')) {
+      return url.replace(/-t\d+x\d+\./, '-t200x200.');
+    }
+    return url;
+  }
+
+  function getTrackThumbUrl(track, size) {
     if (!track) return '';
+    const pick = (u) => (size === 'large' ? u : compactThumbUrl(u));
     const o = getTrackArt(track).cover;
-    if (o) return proxiedThumb(o, track);
-    if (track.localThumbnail) return track.localThumbnail;
+    if (o) return pick(proxiedThumb(o, track));
+    if (track.localThumbnail) return pick(track.localThumbnail);
     const base = track.thumbnail || track.cover || track.image || track.artworkUrl || '';
-    if (base) return proxiedThumb(base, track);
+    if (base) return pick(proxiedThumb(base, track));
     if (track.id && /^[a-zA-Z0-9_-]{11}$/.test(track.id)) {
-      return `https://i.ytimg.com/vi/${track.id}/hqdefault.jpg`;
+      return `https://i.ytimg.com/vi/${track.id}/${size === 'large' ? 'hq' : 'mq'}default.jpg`;
     }
     return '';
   }
+  window.compactThumbUrl = compactThumbUrl;
 
   function renderPlaylistCover(container, playlist, size = 64) {
     if (!container) return;
@@ -27532,7 +27559,7 @@ function bindCoverHoldZoom(wrapEl) {
             document.querySelectorAll('.effect-switch-btn[data-adv="banners"]').forEach(b => b.classList.add('active'));
           }
           localStorage.setItem('riff_banner_media', url);
-          const thumb = getTrackThumbUrl(state.currentTrack);
+          const thumb = getTrackThumbUrl(state.currentTrack, 'large');
           updateRightPanelBanner(thumb);
           updatePlaylistDetailBanner(thumb);
         }
@@ -28260,7 +28287,7 @@ function bindCoverHoldZoom(wrapEl) {
           }
         }
         if (showR && state.currentTrack) {
-          updateRightPanelBanner(getTrackThumbUrl(state.currentTrack));
+          updateRightPanelBanner(getTrackThumbUrl(state.currentTrack, 'large'));
         }
         if (state.isTvKaraokeOpen) syncTvBanner();
       } else if (key === 'karaoke_words') {

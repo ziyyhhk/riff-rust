@@ -330,7 +330,10 @@ fn main() {
             // Cap WebView2 at one renderer process for this single static page.
             // Keep wry's default feature disables explicitly (this flag overrides them).
             let window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App(start_url.into()))
-                .additional_browser_args("--renderer-process-limit=1 --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection")
+                // Software compositing keeps the GPU process near zero; a 2D
+                // music UI does not need accelerated layers and this was worth
+                // about 10 MB of private working set at idle.
+                .additional_browser_args("--renderer-process-limit=1 --enable-low-end-device-mode --disable-gpu-compositing --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection")
                 .title("Riff Rust")
                 .inner_size(win_w, win_h)
                 .position(win_x, win_y)
@@ -347,6 +350,28 @@ fn main() {
                     }
                 })
                 .build()?;
+
+            // WebView2 has an explicit low memory target. Riff is a static UI
+            // plus one audio stream, so it does not need the desktop-sized cache
+            // budget that Chromium reserves by default.
+            #[cfg(windows)]
+            {
+                use webview2_com::Microsoft::Web::WebView2::Win32::{
+                    ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW,
+                };
+                use windows::core::Interface;
+                let result = window.with_webview(|webview| unsafe {
+                    let controller = webview.controller();
+                    if let Ok(core) = controller.CoreWebView2() {
+                        if let Ok(core19) = core.cast::<ICoreWebView2_19>() {
+                            let _ = core19.SetMemoryUsageTargetLevel(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW);
+                        }
+                    }
+                });
+                if let Err(err) = result {
+                    util::log_line("WARN", &format!("webview memory target failed: {err}"));
+                }
+            }
 
             // If the page never finishes loading, do not leave an invisible app running.
             let fallback = window.clone();
