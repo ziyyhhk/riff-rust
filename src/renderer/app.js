@@ -24323,11 +24323,21 @@ function bindCoverHoldZoom(wrapEl) {
     });
   }
 
+  function ensureAccentVisible() {
+    if ((state.themeIntensity || 0) < 8) {
+      state.themeIntensity = 35;
+      localStorage.setItem('riff_theme_intensity', '35');
+      if (el.sliderIntensity) el.sliderIntensity.value = '35';
+      if (el.valIntensity) el.valIntensity.textContent = '35%';
+    }
+  }
+
   if (el.themeSwatches) {
     el.themeSwatches.forEach(sw => {
       sw.addEventListener('click', () => {
         state.themeAccent = sw.dataset.color;
         localStorage.setItem('riff_theme_accent', state.themeAccent);
+        ensureAccentVisible();
         if (state.themeMode === 'auto') {
           const targetMode = currentEffectiveMode || 'dark';
           state.themeMode = targetMode;
@@ -24343,6 +24353,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!/^#[0-9a-f]{6}$/i.test(value)) return;
       state.themeAccent = value.toLowerCase();
       localStorage.setItem('riff_theme_accent', state.themeAccent);
+      ensureAccentVisible();
       if (state.themeMode === 'auto') {
         const targetMode = currentEffectiveMode || 'dark';
         state.themeMode = targetMode;
@@ -27432,6 +27443,10 @@ function bindCoverHoldZoom(wrapEl) {
       if (window.electronAPI && window.electronAPI.pickMedia) {
         const url = await window.electronAPI.pickMedia();
         if (url) {
+          if (typeof setAdv === 'function' && !getAdv('banners', true)) {
+            setAdv('banners', true);
+            document.querySelectorAll('.effect-switch-btn[data-adv="banners"]').forEach(b => b.classList.add('active'));
+          }
           localStorage.setItem('riff_banner_media', url);
           const thumb = getTrackThumbUrl(state.currentTrack);
           updateRightPanelBanner(thumb);
