@@ -14048,6 +14048,13 @@ body.perf #view-settings .settings-view {
 }
 #view-settings .settings-nav {
   background: var(--md-sys-color-surface-container-lowest-solid, #121316) !important;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+#view-settings .settings-nav::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 #view-settings .setting-item {
   background: color-mix(in srgb, var(--md-sys-color-surface-container-solid, #1E1F22) calc(min(var(--ui-alpha, 75%), 75%) * 0.65), transparent) !important;

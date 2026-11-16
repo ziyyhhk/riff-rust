@@ -2862,12 +2862,14 @@ async fn clients5_translate_chunk(
         return None;
     }
     let mut out = Vec::with_capacity(texts.len());
-    for value in arr {
+    for (idx, value) in arr.iter().enumerate() {
         let text = value
             .as_str()
-            .or_else(|| value.get(0).and_then(Value::as_str))?
-            .trim()
-            .to_string();
+            .or_else(|| value.get(0).and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| texts[idx].clone());
         out.push(text);
     }
     Some(out)
