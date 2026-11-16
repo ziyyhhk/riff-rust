@@ -8563,7 +8563,7 @@ input[type="range"].pill-range::-moz-range-thumb {
   position: relative;
   width: min(1100px, 96vw);
   height: min(92vh, 900px);
-  background: var(--md-sys-color-surface-container-lowest, #141517) !important;
+  background: var(--md-sys-color-surface-container-lowest-solid, #141517) !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   border-radius: 28px;
@@ -8591,7 +8591,10 @@ input[type="range"].pill-range::-moz-range-thumb {
   align-items: stretch !important;
 }
 #view-settings .settings-nav {
-  position: static !important;
+  /* position:relative keeps the sliding active pill inside the scrolling
+     nav. With position:static the pill was positioned against the dialog,
+     so it lagged behind by the whole scroll offset. */
+  position: relative !important;
   flex: 0 0 256px !important;
   max-height: 100% !important;
   height: 100% !important;
@@ -14033,13 +14036,18 @@ body:not(.perf) :is(.np-queue-panel, #np-queue-panel, #rail-drawer, .rail-drawer
   transform: none !important;
   will-change: auto !important;
 }
-#view-settings .settings-view {
-  background: color-mix(in srgb, var(--md-sys-color-surface-container-low-solid, #18191c) min(var(--ui-alpha, 75%), 75%), transparent) !important;
-  backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
+/* The glass rule for panels uses body:not(.perf) :is(...) and outranks a
+   plain #view-settings .settings-view selector, so match its specificity. */
+body:not(.perf) #view-settings .settings-view,
+body.perf #view-settings .settings-view {
+  /* Fully opaque. A translucent panel let the bright app behind show
+     through while scrolling, which read as a white washed-out background. */
+  background: var(--md-sys-color-surface-container-low-solid, #18191c) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 #view-settings .settings-nav {
-  background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest-solid, #121316) calc(min(var(--ui-alpha, 75%), 75%) * 0.55), transparent) !important;
+  background: var(--md-sys-color-surface-container-lowest-solid, #121316) !important;
 }
 #view-settings .setting-item {
   background: color-mix(in srgb, var(--md-sys-color-surface-container-solid, #1E1F22) calc(min(var(--ui-alpha, 75%), 75%) * 0.65), transparent) !important;

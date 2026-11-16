@@ -2211,6 +2211,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     localStorage.setItem('riff_theme_intensity', '85');
   }
 
+  // The shipped default theme intensity used to be 0, which is monochrome
+  // mode: accent picks changed nothing on screen and the settings category
+  // pill rendered white. Lift that untouched default once. Anyone who picks
+  // 0 deliberately after this keeps it.
+  if (localStorage.getItem('riff_theme_intensity_visible_v1') !== '1') {
+    localStorage.setItem('riff_theme_intensity_visible_v1', '1');
+    if (localStorage.getItem('riff_theme_intensity') === '0') {
+      localStorage.setItem('riff_theme_intensity', '35');
+    }
+  }
+
   if (localStorage.getItem('riff_np_banners_off_v2') !== '1') {
     localStorage.setItem('riff_np_banners_off_v2', '1');
     localStorage.setItem('riff_adv_track_banners', 'false');
@@ -9904,19 +9915,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!data || !data.success || !Array.isArray(data.translations)) {
           throw new Error((data && data.error) || 'Translation failed');
         }
+        let appliedCount = 0;
         missing.forEach((str, i) => {
           const tr = (data.translations[i] || '').trim();
           if (tr && tr !== str && !/https?:\/\/|linux\.do/i.test(tr)) {
             dict.set(str, tr);
+            appliedCount++;
           }
         });
         Object.entries(staticDict).forEach(([k, v]) => dict.set(k, v));
+        // A couple of built-in strings is not a translated interface. If the
+        // provider returned nothing usable, report failure so the caller
+        // reverts to the previous language instead of silently doing nothing.
+        if (appliedCount === 0 && dict.size < Math.max(8, Math.ceil(texts.length * 0.2))) {
+          return { ok: false, error: 'Translation failed' };
+        }
         const toPersist = {};
         for (const [k, v] of dict.entries()) toPersist[k] = v;
         try { localStorage.setItem('riff_i18n_' + lang, JSON.stringify(toPersist)); } catch (_) {}
         renderDictToDom();
       } catch (err) {
-        if (dict.size === 0) {
+        if (dict.size < Math.max(8, Math.ceil(texts.length * 0.2))) {
           return { ok: false, error: err && err.message ? err.message : 'Translation failed' };
         }
       }
@@ -29816,6 +29835,7 @@ function bindCoverHoldZoom(wrapEl) {
     requestAnimationFrame(() => {
       refreshStacks();
       if (typeof syncAllThemeToggleIndicators === 'function') syncAllThemeToggleIndicators();
+      if (typeof syncSlidingIndicators === 'function') syncSlidingIndicators();
     });
   }
   window.showSettingsCategory = showSettingsCategory;
@@ -29908,6 +29928,13 @@ function bindCoverHoldZoom(wrapEl) {
         showSettingsCategory(btn.dataset.cat);
       }
     });
+    // Keep the sliding active-category pill glued to its button while the nav
+    // scrolls (it used to lag behind / stay on the previous category).
+    settingsNav.addEventListener('scroll', () => {
+      requestAnimationFrame(() => {
+        if (typeof syncSlidingIndicators === 'function') syncSlidingIndicators();
+      });
+    }, { passive: true });
   }
 
   document.querySelectorAll('.settings-home-card').forEach(card => {

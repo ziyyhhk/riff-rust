@@ -2834,6 +2834,58 @@ async fn mymemory_translate(client: reqwest::Client, target: String, text: Strin
         .map(str::to_string)
 }
 
+/// Google's Chrome dictionary endpoint accepts repeated `q` parameters and
+/// answers with a flat array of translations. Unlike the gtx endpoint it is
+/// still served when gtx starts returning 429 for the client IP.
+async fn clients5_translate_chunk(
+    client: reqwest::Client,
+    target: &str,
+    texts: &[String],
+) -> Option<Vec<String>> {
+    let mut url = reqwest::Url::parse("https://clients5.google.com/translate_a/t").ok()?;
+    {
+        let mut qp = url.query_pairs_mut();
+        qp.append_pair("client", "dict-chrome-ex");
+        qp.append_pair("sl", "en");
+        qp.append_pair("tl", target);
+        for text in texts {
+            qp.append_pair("q", text);
+        }
+    }
+    let resp = client.get(url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let json: Value = resp.json().await.ok()?;
+    let arr = json.as_array()?;
+    if arr.len() != texts.len() {
+        return None;
+    }
+    let mut out = Vec::with_capacity(texts.len());
+    for value in arr {
+        let text = value
+            .as_str()
+            .or_else(|| value.get(0).and_then(Value::as_str))?
+            .trim()
+            .to_string();
+        out.push(text);
+    }
+    Some(out)
+}
+
+async fn clients5_translate_batch(
+    client: reqwest::Client,
+    target: &str,
+    texts: &[String],
+) -> Option<Vec<String>> {
+    let mut out = Vec::with_capacity(texts.len());
+    for chunk in texts.chunks(24) {
+        let translated = clients5_translate_chunk(client.clone(), target, chunk).await?;
+        out.extend(translated);
+    }
+    Some(out)
+}
+
 /// Google's gtx endpoint accepts a `\n`-joined batch and answers with one
 /// segment per input line, in order; the translation of every line except the
 /// last carries the trailing `\n`. Falls back to per-line requests if the
@@ -2949,12 +3001,18 @@ async fn i18n_batch(State(state): State<Shared>, Json(body): Json<Value>) -> Res
         // DeepL failed or misaligned; fall through to Google.
     }
 
-    // 2) Google gtx (works when quota isn't throttled).
+    // 2) Google's Chrome dictionary endpoint. It takes a batch of `q`
+    // parameters and keeps working when gtx throttles the client IP.
+    if let Some(translations) = clients5_translate_batch(http_client(&state), &target, &texts).await {
+        return json_ok(json!({ "success": true, "translations": translations }));
+    }
+
+    // 3) Google gtx (works when quota isn't throttled).
     if let Some(translations) = google_translate_batch(&state, &target, &texts).await {
         return json_ok(json!({ "success": true, "translations": translations }));
     }
 
-    // 3) Last resort: MyMemory per line. Slow (roundtrip per string) but works
+    // 4) Last resort: MyMemory per line. Slow (roundtrip per string) but works
     // even when Google refuses the IP.
     let client = http_client(&state);
     let target = target.clone();
