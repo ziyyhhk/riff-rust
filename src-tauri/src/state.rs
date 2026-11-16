@@ -89,6 +89,11 @@ pub struct AppState {
     pub lyrics_cache: Mutex<HashMap<String, (Instant, Value)>>,
     /// Word-level (NetEase yrc) lyric responses (6h pos / 10min neg).
     pub lyrics_words_cache: Mutex<HashMap<String, (Instant, Value)>>,
+    /// Latest full storage map seen by `storage_save_batch`/`storage_save_sync`.
+    /// The renderer debounces disk writes by ~200ms and a tray Quit never runs
+    /// any JS at all, so without this shadow the last writes were silently lost
+    /// on quit (settings, toggles, progress: gone). Flushed synchronously on quit.
+    pub storage_shadow: Mutex<Option<serde_json::Value>>,
     /// Scraped SoundCloud `client_id` (12h TTL), shared by search and resolve.
     pub soundcloud_client_id: Mutex<Option<(String, Instant)>>,
 }
@@ -120,6 +125,7 @@ impl AppState {
             lyrics_cache: Mutex::new(HashMap::new()),
             lyrics_words_cache: Mutex::new(HashMap::new()),
             soundcloud_client_id: Mutex::new(None),
+            storage_shadow: Mutex::new(None),
         }
     }
 

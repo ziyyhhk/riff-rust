@@ -47,7 +47,11 @@
       const args = { multiple: !!multiple, directory: !!directory };
       if (filters) args.filters = filters;
       if (title) args.title = title;
-      const result = await rawInvoke('plugin:dialog|open', args);
+      // Tauri v2 plugin IPC wraps command args in an `options` object, e.g.
+      // { options: {...} }. Passing the fields flat makes the command reject
+      // every call with "missing required key options", which this try/catch
+      // swallowed: every file or folder button in the app silently did nothing.
+      const result = await rawInvoke('plugin:dialog|open', { options: args });
       if (!result) return null;
       // Desktop returns a bare path string (single pick) or a string array (multi)
       return Array.isArray(result) ? result : [result];
@@ -81,7 +85,14 @@
     // --- window chrome ---
     minimizeWindow: () => invoke('window_minimize'),
     maximizeWindow: () => invoke('window_maximize'),
-    closeWindow: () => invoke('window_close'),
+    closeWindow: () => {
+            try {
+              if (window.__RIFF_STORAGE_MAP__ && window.electronAPI.storageSaveSync) {
+                window.electronAPI.storageSaveSync(window.__RIFF_STORAGE_MAP__);
+              }
+            } catch (_) {}
+            return invoke('window_close');
+          },
     setWindowButtonsVisible: (visible) => invoke('set_window_buttons_visible', { visible }),
     setZoomFactor: (factor) => invoke('set_zoom_factor', { factor }),
     getZoomFactor: () => Promise.resolve(1.0),

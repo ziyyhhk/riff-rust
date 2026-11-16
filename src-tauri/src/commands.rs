@@ -752,13 +752,31 @@ pub fn storage_get_all() -> serde_json::Value {
     util::read_json_file(&util::storage_path())
 }
 
+fn store_storage_shadow(state: &Shared, data: &serde_json::Value) {
+    if let Ok(mut guard) = state.storage_shadow.lock() {
+        *guard = Some(data.clone());
+    }
+}
+
+/// Flush the shadow storage map to disk synchronously. Called on quit paths
+/// where the renderer's debounced write can no longer run.
+pub fn flush_storage_shadow(state: &Shared) {
+    if let Ok(guard) = state.storage_shadow.lock() {
+        if let Some(data) = guard.clone() {
+            let _ = util::write_json_file(&util::storage_path(), &data);
+        }
+    }
+}
+
 #[tauri::command]
-pub fn storage_save_batch(data: serde_json::Value) -> bool {
+pub fn storage_save_batch(data: serde_json::Value, state: State<'_, Shared>) -> bool {
+    store_storage_shadow(state.inner(), &data);
     util::write_json_file(&util::storage_path(), &data)
 }
 
 #[tauri::command]
-pub fn storage_save_sync(data: serde_json::Value) -> bool {
+pub fn storage_save_sync(data: serde_json::Value, state: State<'_, Shared>) -> bool {
+    store_storage_shadow(state.inner(), &data);
     util::write_json_file(&util::storage_path(), &data)
 }
 

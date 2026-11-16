@@ -381,6 +381,10 @@ fn main() {
                                 if let Ok(mut quitting) = state.quitting.lock() {
                                     *quitting = true;
                                 }
+                                // Flush the shadow storage map synchronously. The
+                                // renderer's 200ms debounce never runs here, and the
+                                // last writes (like a settings toggle) would be lost.
+                                commands::flush_storage_shadow(state.inner());
                                 app.exit(0);
                             }
                             _ => {}
@@ -423,6 +427,10 @@ fn main() {
                     if state.set_window_visible(false) {
                         let _ = window.emit("window-visibility", false);
                     }
+                } else {
+                    // The window will be destroyed: flush the storage shadow now,
+                    // since no JS will get a chance to run its debounced save.
+                    commands::flush_storage_shadow(state.inner());
                 }
             }
             _ => {}
