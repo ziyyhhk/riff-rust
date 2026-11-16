@@ -1078,6 +1078,43 @@ async fn search(State(state): State<Shared>, Query(q): Query<HashMap<String, Str
 
 // ------------------------------------------------------------- stream info
 
+/// Inner-API YouTube search used by the stream-info paths when a track
+/// cannot be played directly (synthetic ids, failed SoundCloud permalink
+/// resolves). This is the same resolution manual search relies on, which
+/// is why searched tracks play while bare permalink imports do not.
+async fn youtube_search_fallback(
+    state: &Shared,
+    q: &HashMap<String, String>,
+    title: &str,
+    artist: &str,
+) -> Option<String> {
+    let sent = qp(q, "q");
+    let query = if !sent.trim().is_empty() {
+        sent
+    } else {
+        format!("{artist} {title}").trim().to_string()
+    };
+    if query.is_empty() {
+        return None;
+    }
+    match ytm::search(&state.http(), &query, 3).await {
+        Ok(hits) if !hits.is_empty() => {
+            let hit = best_search_hit(&hits, title, artist);
+            hit.get("id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        }
+        Ok(_) => None,
+        Err(e) => {
+            util::log_line(
+                "WARN",
+                &format!("stream-info search failed for \"{query}\": {e}"),
+            );
+            None
+        }
+    }
+}
+
 async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
     let mut id = qp(&q, "id");
     let url = qp(&q, "url");
@@ -1151,39 +1188,17 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
         if target_is_youtube && !id_is_video {
             if let Some(vid) = url_video_id {
                 id = vid;
-            } else {
-                let query = {
-                    let sent = qp(&q, "q");
-                    if sent.trim().is_empty() {
-                        format!("{artist} {title}").trim().to_string()
-                    } else {
-                        sent
-                    }
-                };
-                if !query.is_empty() {
-                    match ytm::search(&state.http(), &query, 3).await {
-                        Ok(hits) if !hits.is_empty() => {
-                            let hit = best_search_hit(&hits, &title, &artist);
-                            if let Some(vid) = hit.get("id").and_then(Value::as_str) {
-                                util::log_line(
-                                    "INFO",
-                                    &format!("stream-info: search \"{query}\" -> {vid}"),
-                                );
-                                id = vid.to_string();
-                            }
-                        }
-                        Ok(_) => {}
-                        Err(e) => util::log_line(
-                            "WARN",
-                            &format!("stream-info search failed for \"{query}\": {e}"),
-                        ),
-                    }
-                }
+            } else if let Some(vid) = youtube_search_fallback(&state, &q, &title, &artist).await {
+                util::log_line(
+                    "INFO",
+                    &format!("stream-info: search resolved {vid}"),
+                );
+                id = vid;
             }
         }
     }
 
-    let target = if !url.trim().is_empty() {
+    let mut target = if !url.trim().is_empty() {
         url.clone()
     } else if !id.is_empty() {
         format!("https://www.youtube.com/watch?v={id}")
@@ -1301,7 +1316,29 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
                 return json_ok(payload);
             }
             None => {
-                util::log_line("INFO", "soundcloud: direct resolve failed; falling back to yt-dlp");
+                util::log_line(
+                    "INFO",
+                    "soundcloud: direct resolve failed; trying YouTube search",
+                );
+                // SoundCloud permalink imports fail the direct resolve whenever the
+                // SC client_id scrape or transcoding API breaks. The same song is
+                // almost always playable on YouTube, so resolve it there by title
+                // and artist (the same resolution manual search uses) instead of
+                // dying on the slow yt-dlp fallback. Only when the search finds
+                // nothing do we drop back to the SoundCloud yt-dlp lane.
+                if let Some(vid) = youtube_search_fallback(&state, &q, &title, &artist).await {
+                    util::log_line(
+                        "INFO",
+                        &format!("stream-info: soundcloud fallback search resolved {vid}"),
+                    );
+                    id = vid.clone();
+                    target = format!("https://www.youtube.com/watch?v={vid}");
+                } else {
+                    util::log_line(
+                        "WARN",
+                        "soundcloud: search fallback found nothing; falling back to yt-dlp",
+                    );
+                }
             }
         }
     }
