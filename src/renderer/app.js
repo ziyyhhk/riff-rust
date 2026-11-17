@@ -26898,14 +26898,6 @@ function bindCoverHoldZoom(wrapEl) {
         <div class="support-me-content">
           <span class="support-me-title setting-name">Support me!</span>
           <span class="support-me-desc setting-hint">Share Riff Rust with other people so the project keeps going!</span>
-          <div class="support-me-actions">
-            <a href="https://ko-fi.com/rootlesszen/" target="_blank" rel="noopener noreferrer" class="btn-pill-primary support-me-btn" id="btn-support-buy-coffee" style="text-decoration: none !important; border: none !important; outline: none !important;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="flex-shrink:0;">
-                <path d="M20 3H4v10c0 2.21 1.79 4 4 4h6c2.21 0 4-1.79 4-4v-3h2c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 5h-2V5h2v3zM4 19h16v2H4z"/>
-              </svg>
-              <span>Buy a coffee</span>
-            </a>
-          </div>
         </div>
       </div>
     `;
@@ -26917,19 +26909,42 @@ function bindCoverHoldZoom(wrapEl) {
       aboutSec.appendChild(group);
     }
 
-    const btnCoffee = group.querySelector('#btn-support-buy-coffee');
-    if (btnCoffee) {
-      btnCoffee.addEventListener('click', (e) => {
-        const coffeeUrl = 'https://ko-fi.com/rootlesszen/';
-        try {
-          window.open(coffeeUrl, '_blank');
-        } catch (_) {}
-      });
-    }
-
     initAboutSupportLottie();
   }
   ensureAboutSupportDOM();
+
+  // Clicking the Discord link in the About credits should land in the Discord
+  // app when it is installed, and in the browser otherwise. The app reports
+  // handles for https/http/mailto only, so give discord:// its own path.
+  (function bindSettingsDiscordLink() {
+    const link = document.getElementById('settings-discord-link');
+    if (!link || link._discordBound) return;
+    link._discordBound = true;
+    const INVITE = 'https://discord.gg/PsTXVKeqFZ';
+    const DEEPLINK = 'discord://-/invite/PsTXVKeqFZ';
+    const openExternal = (u) => {
+      try {
+        if (window.electronAPI && window.electronAPI.openExternal) window.electronAPI.openExternal(u);
+        else window.open(u, '_blank', 'noopener');
+      } catch (_) { /* browser fallback below still works */ }
+    };
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      let discordOpened = false;
+      const mark = () => { discordOpened = true; };
+      const onVis = () => { if (document.visibilityState === 'hidden') discordOpened = true; };
+      window.addEventListener('blur', mark, { once: true });
+      document.addEventListener('visibilitychange', onVis, { once: true });
+      // The OS protocol handler steals focus when Discord is installed. Give it
+      // a moment; if nothing stole focus, Discord is not here so open the web.
+      setTimeout(() => {
+        window.removeEventListener('blur', mark);
+        document.removeEventListener('visibilitychange', onVis);
+        if (!discordOpened) openExternal(INVITE);
+      }, 1200);
+      openExternal(DEEPLINK);
+    });
+  })();
 
   document.addEventListener('visibilitychange', () => {
     updateAboutSupportLottieState();

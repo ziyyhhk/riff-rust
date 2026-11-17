@@ -707,7 +707,10 @@ pub fn open_logs_folder(_app: AppHandle) -> bool {
 
 #[tauri::command]
 pub fn open_external(u: String) {
-    if !(u.starts_with("https://") || u.starts_with("http://") || u.starts_with("mailto:")) {
+    // https/http/mailto are always fine, and discord:// is accepted so the
+    // Discord deep links in the About credits can reach an installed Discord
+    // client. Unknown schemes are still refused.
+    if !(u.starts_with("https://") || u.starts_with("http://") || u.starts_with("mailto:") || u.starts_with("discord://")) {
         return;
     }
     #[cfg(target_os = "windows")]

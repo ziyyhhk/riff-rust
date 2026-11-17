@@ -41,7 +41,7 @@
      background image bled through every panel in a different tint, which read
      as random colors everywhere. The photo still shows through, panels stay
      uniform and text stays readable. */
-  --surface-alpha: max(var(--ui-alpha), 62%);
+  --surface-alpha: max(var(--ui-alpha), 78%);
   --md-sys-color-background-solid: #121214;
   --md-sys-color-background: color-mix(in srgb, #121214 var(--surface-alpha), transparent);
   --md-sys-color-surface-solid: #121214;
@@ -2602,9 +2602,9 @@ body.perf .artist-about-card {
   inset: 0;
   pointer-events: none;
   background: linear-gradient(to bottom,
-    color-mix(in srgb, var(--md-sys-color-surface-container-low) 15%, transparent) 0%,
-    color-mix(in srgb, var(--md-sys-color-surface-container-low) 55%, transparent) 45%,
-    color-mix(in srgb, var(--md-sys-color-surface-container-low) 75%, transparent) 100%
+    color-mix(in srgb, var(--md-sys-color-surface-container-low) 38%, transparent) 0%,
+    color-mix(in srgb, var(--md-sys-color-surface-container-low) 62%, transparent) 45%,
+    color-mix(in srgb, var(--md-sys-color-surface-container-low) 80%, transparent) 100%
   );
 }
 
@@ -5754,7 +5754,7 @@ body.perf .toast-badge { animation: none !important; }
   box-shadow: none !important;
   border: none !important;
   outline: none !important;
-  background: color-mix(in srgb, var(--md-sys-color-background-solid, #141418) var(--ui-alpha, 75%), transparent) !important;
+  background: color-mix(in srgb, var(--md-sys-color-background-solid, #141418) var(--surface-alpha), transparent) !important;
   backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   border-radius: 18px !important;
@@ -10743,7 +10743,7 @@ body:not(.home-spotify) #sp-home { display: none; }
   border-radius: 12px !important;
   overflow: hidden;
   cursor: pointer;
-  background: color-mix(in srgb, var(--md-sys-color-surface-container-high) 70%, transparent) !important;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-high) 84%, transparent) !important;
   transform: none !important;
   filter: none !important;
   transition: background 180ms ease !important;
@@ -11833,7 +11833,7 @@ body.perf .btn-proxy-remove {
   min-width: 216px;
   padding: 8px;
   border-radius: 20px;
-  background: color-mix(in srgb, var(--md-sys-color-background-solid, #121212) var(--ui-alpha, 75%), transparent) !important;
+  background: color-mix(in srgb, var(--md-sys-color-background-solid, #121212) var(--surface-alpha), transparent) !important;
   backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   color: var(--md-sys-color-on-surface, #f2f2f2);
@@ -12418,8 +12418,8 @@ body[data-theme="light"] {
 body.cover-bg-on,
 body.has-video-bg,
 body.has-custom-bg {
-  --page-bg: color-mix(in srgb, var(--page-solid) max(var(--ui-alpha, 50%), 62%), transparent);
-  --panel-bg: color-mix(in srgb, color-mix(in srgb, var(--page-solid) 96%, white 4%) max(calc(var(--ui-alpha, 50%) + 3%), 65%), transparent);
+  --page-bg: color-mix(in srgb, var(--page-solid) max(var(--ui-alpha, 50%), 72%), transparent);
+  --panel-bg: color-mix(in srgb, color-mix(in srgb, var(--page-solid) 96%, white 4%) max(calc(var(--ui-alpha, 50%) + 3%), 75%), transparent);
   --bar-editor-bg: var(--panel-bg);
 }
 
@@ -12536,7 +12536,7 @@ body:not(.classic-sidebar):not(.mini) .rail-drawer {
   top: 44px !important;
   bottom: 96px !important;
   height: auto !important;
-  background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--ui-alpha, 75%), transparent) !important;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--surface-alpha), transparent) !important;
   backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   border-radius: 0 28px 28px 0 !important;
@@ -12776,7 +12776,7 @@ body.classic-sidebar.sidebar-expanded:not(.mini) .rail-drawer {
   height: 100% !important;
   max-height: 100% !important;
   border-radius: 10px !important;
-  background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--ui-alpha, 75%), transparent) !important;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--surface-alpha), transparent) !important;
   backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important;
@@ -12912,7 +12912,7 @@ body.perf .i18n-shape-box {
   max-width: calc(100vw - 32px);
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--ui-alpha, 75%), transparent) !important;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--surface-alpha), transparent) !important;
   backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   color: var(--md-sys-color-on-surface);
@@ -13147,7 +13147,7 @@ body.perf .riff-orbit-item,
   z-index: 900;
   box-shadow: none !important;
   border: none !important;
-  background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--ui-alpha, 85%), transparent) !important;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--surface-alpha), transparent) !important;
   backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   opacity: 0;
@@ -13168,7 +13168,7 @@ body.perf .search-history-panel {
   transition: none !important;
 }
 body:not(.perf) :is(.np-queue-panel, #np-queue-panel, #rail-drawer, .rail-drawer, .audio-menu-card, #audio-menu, .audio-menu-card.connected-editor, .m3-dropdown-menu, .m3-dropdown-panel, .riff-ctx-menu, .search-history-panel, .lyrics-action-sheet, .lyrics-panel-sheet, #view-settings .settings-view) {
-  background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) min(var(--ui-alpha, 75%), 75%), transparent) !important;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--surface-alpha), transparent) !important;
   backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   box-shadow: none !important;
@@ -14031,7 +14031,7 @@ body:not(.cover-bg-on) .cover-bg-layer {
 .account-avatar-picker:hover .account-avatar-overlay { opacity: 1; }
 body.perf .account-avatar-overlay { transition: none !important; }
 body:not(.perf) :is(.np-queue-panel, #np-queue-panel, #rail-drawer, .rail-drawer, .audio-menu-card, #audio-menu, .audio-menu-card.connected-editor, .m3-dropdown-menu, .m3-dropdown-panel, .riff-ctx-menu, .search-history-panel, .lyrics-action-sheet, .lyrics-panel-sheet, #view-settings .settings-view) {
-  background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) min(var(--ui-alpha, 75%), 75%), transparent) !important;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--surface-alpha), transparent) !important;
   backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
   box-shadow: none !important;
@@ -14074,7 +14074,7 @@ body.perf #view-settings .settings-view {
   display: none;
 }
 #view-settings .setting-item {
-  background: color-mix(in srgb, var(--md-sys-color-surface-container-solid, #1E1F22) calc(min(var(--ui-alpha, 75%), 75%) * 0.65), transparent) !important;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-solid, #1E1F22) calc(var(--surface-alpha) * 0.65), transparent) !important;
 }
 :root {
   --panel-blur: 24px;
@@ -15533,7 +15533,7 @@ body:not(.hide-sp-table-cols) .sp-tracks-table-head {
   color: var(--md-sys-color-on-surface-variant) !important;
   font-size: 12px !important;
   font-weight: 500 !important;
-  opacity: 0.75 !important;
+  opacity: 0.85 !important;
 }
 body:not(.hide-sp-table-cols) .sp-tracks-table-head .sp-th-num {
   grid-column: 1 !important;
@@ -16897,3 +16897,16 @@ body:not(.is-playing) #right-panel-title.is-marquee .rp-title-inner {
   animation-play-state: paused !important;
 }
 
+
+/* A background photo/video sits behind the whole UI. At very low interface
+   opacity, rows and card bodies used to sit on the bare photo, which read as
+   random color patches and washed out white text. A faint uniform scrim fixes
+   readability without hiding the background the user picked. */
+body:is(.has-custom-bg, .has-video-bg, .cover-bg-on) .track-row,
+body:is(.has-custom-bg, .has-video-bg, .cover-bg-on) .sp-card {
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 56%, transparent) !important;
+}
+body:is(.has-custom-bg, .has-video-bg, .cover-bg-on) .track-row:hover,
+body:is(.has-custom-bg, .has-video-bg, .cover-bg-on) .sp-card:hover {
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-high) 68%, transparent) !important;
+}
