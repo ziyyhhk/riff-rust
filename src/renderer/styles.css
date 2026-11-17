@@ -16910,3 +16910,13 @@ body:is(.has-custom-bg, .has-video-bg, .cover-bg-on) .track-row:hover,
 body:is(.has-custom-bg, .has-video-bg, .cover-bg-on) .sp-card:hover {
   background: color-mix(in srgb, var(--md-sys-color-surface-container-high) 68%, transparent) !important;
 }
+
+/* The background image used to bleed through the sidebar, which tinted it
+   red and made the search column look broken. The sidebar stays a solid
+   dark slab whenever a background is active; the main content keeps the
+   translucency the user picked. */
+body:is(.has-custom-bg, .has-video-bg, .cover-bg-on) .sidebar {
+  background: #141419 !important;
+  backdrop-filter: blur(24px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(140%) !important;
+}

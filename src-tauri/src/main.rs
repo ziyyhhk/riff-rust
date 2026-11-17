@@ -275,6 +275,7 @@ fn main() {
             commands::set_download_dir,
             commands::get_app_version,
             commands::check_for_updates,
+            commands::install_update_if_newer,
             commands::update_action,
             commands::install_update_now,
             commands::set_tray_on_close,

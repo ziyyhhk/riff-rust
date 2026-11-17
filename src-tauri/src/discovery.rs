@@ -375,12 +375,14 @@ async fn ytm_mix_tracks(state: &Shared, seed_vid: &str, limit: usize) -> Vec<Val
 }
 
 fn chart_score(combined: &str) -> u32 {
-    if combined.contains("top 100") {
+    if combined.contains("top 100") || combined.contains("топ 100") {
         30
-    } else if combined.contains("trending") {
+    } else if combined.contains("trending") || combined.contains("тренд") {
         20
-    } else if combined.contains("top 50") {
+    } else if combined.contains("top 50") || combined.contains("топ 50") {
         10
+    } else if combined.contains("top") || combined.contains("топ") || combined.contains("chart") {
+        5
     } else {
         0
     }
@@ -407,15 +409,14 @@ async fn ytm_chart_tracks(state: &Shared, country: &str, limit: usize) -> Vec<Va
         return Vec::new();
     };
 
-    // Collect chart cards and rank them.
+    // Collect chart cards and rank them. Not every country phrases its chart
+    // row with the word "chart", so anything that carries a playlist id is a
+    // candidate and chart_score sorts them.
     let mut cards: Vec<(u32, String)> = Vec::new();
     for card in collect_named(&page, "musicTwoRowItemRenderer") {
         let title = card.get("title").map(first_text).unwrap_or_default().to_lowercase();
         let subtitle = card.get("subtitle").map(first_text).unwrap_or_default().to_lowercase();
         let combined = format!("{title} {subtitle}");
-        if !combined.contains("chart") {
-            continue;
-        }
         let playlist = card
             .get("navigationEndpoint")
             .and_then(|n| n.get("browseEndpoint"))
@@ -548,37 +549,101 @@ pub async fn vibe(state: &Shared, body: &Value) -> Value {
         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
 
-    // Seed selection: explicit seeds (weighted) else favorites+history top weighted artists.
-    let mut seeds: Vec<(String, f64)> = Vec::new();
+    // Seed selection: explicit seeds (weighted) else favorites+history top artists.
+    // Prefer seeds that carry the exact track id, so the radio is seeded by
+    // the song on the user's queue instead of a first-hit artist search
+    // (this is what actually ties recommendations to the genre being played).
+    struct Seed {
+        artist: String,
+        title: String,
+        id: String,
+        weight: f64,
+
+    }
+    let mut seeds: Vec<Seed> = Vec::new();
     if let Some(list) = body.get("seeds").and_then(|v| v.as_array()) {
         for seed in list {
             let artist = seed.get("artist").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-            let weight = seed.get("weight").and_then(|v| v.as_f64()).unwrap_or(1.0);
-            if !artist.is_empty() {
-                seeds.push((artist, weight));
+            if artist.is_empty() {
+                continue;
             }
+            let title = seed.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            let platform = seed
+                .get("platform")
+                .or_else(|| seed.get("source"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_lowercase();
+            let weight = seed.get("weight").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            let mut id = seed.get("id").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            let usable = !id.is_empty()
+                && platform != "soundcloud"
+                && id.len() >= 8
+                && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+            if !usable {
+                id = String::new();
+            }
+            seeds.push(Seed { artist, title, id, weight });
         }
     }
     if seeds.is_empty() {
         // fall back to top artists as seeds
-        seeds = top_artists.iter().take(8).map(|a| (a.clone(), 2.0)).collect();
+        seeds = top_artists
+            .iter()
+            .take(8)
+            .map(|a| Seed {
+                artist: a.clone(),
+                title: String::new(),
+                id: String::new(),
+                weight: 2.0,
+            })
+            .collect();
     }
     seeds.truncate(8);
 
-    // Resolve seed video ids via YTM search — four lookups in flight.
+    // Resolve seed video ids. Use the track's own id when we have one, else
+    // search the best matching song by artist and title.
     let seed_futures: Vec<_> = seeds
         .iter()
         .take(4)
-        .map(|(artist, weight)| {
+        .map(|seed| {
             let client = state.http();
-            let artist = artist.clone();
-            let weight = *weight;
+            let artist = seed.artist.clone();
+            let title = seed.title.clone();
+            let id = seed.id.clone();
+            let weight = seed.weight;
             async move {
-                let id = ytm::search(&client, &artist, 1)
-                    .await
-                    .ok()
-                    .and_then(|tracks| tracks.into_iter().next())
-                    .and_then(|track| track.get("id").and_then(|v| v.as_str()).map(String::from));
+                if !id.is_empty() {
+                    return (Some(id), weight);
+                }
+                let query = if title.is_empty() {
+                    artist.clone()
+                } else {
+                    format!("{artist} {title}")
+                };
+                let tracks = ytm::search(&client, &query, 3).await.unwrap_or_default();
+                let id = if !title.is_empty() {
+                    tracks
+                        .iter()
+                        .find(|t| {
+                            t.get("title")
+                                .and_then(|v| v.as_str())
+                                .map(|tt| {
+                                    let tt = tt.to_lowercase();
+                                    let title = title.to_lowercase();
+                                    tt.contains(&title) || title.contains(&tt)
+                                })
+                                .unwrap_or(false)
+                        })
+                        .or_else(|| tracks.first())
+                        .and_then(|t| t.get("id").and_then(|v| v.as_str()).map(String::from))
+                } else {
+                    tracks
+                        .into_iter()
+                        .next()
+                        .and_then(|t| t.get("id").and_then(|v| v.as_str()).map(String::from))
+                };
                 (id, weight)
             }
         })
@@ -607,10 +672,10 @@ pub async fn vibe(state: &Shared, body: &Value) -> Value {
     // Deezer related tracks for diversity — seeds and their related artists in flight.
     let dz_futures: Vec<_> = seeds
         .iter()
-        .map(|(artist, weight)| {
+        .map(|seed| {
             let st = state.clone();
-            let artist = artist.clone();
-            let weight = *weight;
+            let artist = seed.artist.clone();
+            let weight = seed.weight;
             async move {
                 let mut out: Vec<(Value, f64)> = Vec::new();
                 let encoded = util::percent_encode(&artist);
@@ -790,127 +855,15 @@ pub async fn trending(state: &Shared, query: &HashMap<String, String>) -> Value 
     let region = query
         .get("region")
         .map(|r| r.trim().to_lowercase())
-        .filter(|r| r.chars().all(|c| c.is_ascii_lowercase()) && r.len() == 2)
+        .filter(|r| (r.chars().all(|c| c.is_ascii_lowercase()) && r.len() == 2) || r == "global")
         .unwrap_or_else(|| "us".to_string());
-    let artists: Vec<String> = query
-        .get("artists")
-        .map(|a| {
-            a.split(|c| c == ',' || c == ';' || c == '|')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .take(3)
-                .collect()
-        })
-        .unwrap_or_default();
 
-    let cache_key = format!("disc:trending:{region}:{}", artists.join(",").chars().take(40).collect::<String>());
-    if let Some(cached) = cache_get(&state.stream_cache, &cache_key, Duration::from_secs(30 * 60)) {
-        return json!({ "success": true, "tracks": cached });
-    }
-
-    let scene: &[&str] = match region.as_str() {
-        "ru" | "ua" | "kz" => &[
-            "PHARAOH", "Oxxxymiron", "ATL", "Miyagi & Andy Panda", "Kizaru", "???",
-            "Morgenshtern", "Big Baby Tape", "BTS", "Lil Pump",
-        ],
-        _ => &[
-            "Playboi Carti", "Yeat", "Travis Scott", "Future", "Don Toliver", "Kendrick Lamar",
-            "Drake", "Travis Scott", "Baby Keem", "Myke Towers",
-        ],
-    };
-    let mut seeds = artists.clone();
-    for s in scene.iter().take(6) {
-        seeds.push(s.to_string());
-    }
-    seeds.truncate(8);
-
-    let mut interleaved: Vec<Value> = Vec::new();
-    let seed_futures: Vec<_> = seeds
-        .iter()
-        .map(|artist| {
-            let st = state.clone();
-            let artist = artist.clone();
-            async move {
-                let encoded = util::percent_encode(&artist);
-                let dz_url = format!("https://api.deezer.com/search?q=artist:\"{encoded}\"&limit=4");
-                let client = st.http();
-                let dz_fut = client.get(&dz_url).send();
-                let ytm_fut = ytm::search(&client, &artist, 4);
-                let (dz_resp, ytm_tracks) = futures_util::future::join(dz_fut, ytm_fut).await;
-                (artist, dz_resp, ytm_tracks)
-            }
-        })
-        .collect();
-    for (artist, dz_resp, ytm_tracks) in futures_util::future::join_all(seed_futures).await {
-        if let Ok(resp) = dz_resp {
-            if let Ok(json) = resp.json::<Value>().await {
-                if let Some(items) = json.get("data").and_then(|d| d.as_array()) {
-                    for item in items.iter().take(4) {
-                        let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                        let name = item
-                            .get("artist")
-                            .and_then(|a| a.get("name").and_then(|v| v.as_str()))
-                            .unwrap_or(&artist);
-                        let duration = item.get("duration").and_then(|v| v.as_u64()).unwrap_or(0);
-                        let cover = item
-                            .get("album")
-                            .and_then(|a| a.get("cover_big").or_else(|| a.get("cover_medium")))
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        let explicit = item.get("explicit_lyrics").and_then(|v| v.as_bool()).unwrap_or(false);
-                        if title.is_empty() {
-                            continue;
-                        }
-                        interleaved.push(json_track(
-                            format!("dz-{}", item.get("id").and_then(|v| v.as_u64()).unwrap_or(0)),
-                            title.to_string(),
-                            name.to_string(),
-                            cover.to_string(),
-                            duration,
-                            "ytmusic",
-                            "deezer",
-                            Some(explicit),
-                        ));
-                    }
-                }
-            }
-        }
-        for track in ytm_tracks.unwrap_or_default().into_iter().take(4) {
-            let mut map = track.as_object().cloned().unwrap_or_default();
-            map.insert("platform".to_string(), json!("ytmusic"));
-            map.insert("source".to_string(), json!("ytmusic"));
-            interleaved.push(Value::Object(map));
-        }
-    }
-
-    let mut seen: HashMap<String, u32> = HashMap::new();
-    let mut out: Vec<Value> = Vec::new();
-    for mut track in interleaved {
-        let title = track.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let artist = track.get("artist").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let key = normalized_key(&title, &artist);
-        let count = seen.entry(key.clone()).or_insert(0);
-        if *count >= 1 {
-            continue;
-        }
-        let per_artist = out
-            .iter()
-            .filter(|t| t.get("artist").and_then(|v| v.as_str()).map(|a| a.eq_ignore_ascii_case(&artist)).unwrap_or(false))
-            .count();
-        if per_artist >= 2 {
-            continue;
-        }
-        if let Some(map) = track.as_object_mut() {
-            with_listener_fields(map, out.len());
-        }
-        *count += 1;
-        out.push(track);
-        if out.len() >= 35 {
-            break;
-        }
-    }
-    cache_put(&state.stream_cache, cache_key, json!(out), 64, Duration::from_secs(30 * 60));
-    json!({ "success": true, "tracks": out })
+    // Real YouTube Music charts for the region, with iTunes and Last.fm as
+    // network fallbacks. This replaced the old hardcoded scene lists.
+    let chart_query = HashMap::from([(String::from("country"), region)]);
+    let chart = top_chart(state, &chart_query).await;
+    let tracks = chart.get("tracks").cloned().unwrap_or_else(|| Value::Array(vec![]));
+    json!({ "success": true, "tracks": tracks })
 }
 
 pub async fn top_chart(state: &Shared, query: &HashMap<String, String>) -> Value {
@@ -918,7 +871,7 @@ pub async fn top_chart(state: &Shared, query: &HashMap<String, String>) -> Value
         .get("country")
         .map(|c| c.trim().to_lowercase())
         .filter(|c| c == "global" || (c.chars().all(|ch| ch.is_ascii_lowercase()) && c.len() == 2))
-        .unwrap_or_else(|| "ua".to_string());
+        .unwrap_or_else(|| "us".to_string());
 
     let cache_key = format!("disc:chart:{country}");
     if let Some(cached) = cache_get(&state.stream_cache, &cache_key, Duration::from_secs(30 * 60)) {
@@ -927,7 +880,7 @@ pub async fn top_chart(state: &Shared, query: &HashMap<String, String>) -> Value
 
     let mut tracks: Vec<Value> = ytm_chart_tracks(state, &country, 50).await;
 
-    if tracks.len() < 8 {
+    if tracks.len() < 8 && country != "global" {
         let itunes_url = format!("https://itunes.apple.com/{}/rss/topsongs/limit=40/json", country);
         if let Ok(resp) = state.http().get(&itunes_url).send().await {
             if let Ok(json) = resp.json::<Value>().await {
@@ -982,7 +935,7 @@ pub async fn top_chart(state: &Shared, query: &HashMap<String, String>) -> Value
         }
     }
 
-    if tracks.len() < 6 {
+    if tracks.len() < 6 && country != "global" {
         let lfm_url = format!(
             "https://ws.audioscrobbler.com/2.0/?method=geo.gettoptracks&country={}&limit=40&api_key={}&format=json",
             util::percent_encode(&country),

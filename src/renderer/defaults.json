@@ -149,7 +149,7 @@
   "riff_play_btn_bg": "false",
   "riff_adv_track_credits": "true",
   "riff_lyrics_fullscreen_only": "1",
-  "riff_trending_region": "ru",
+  "riff_trending_region": "us",
   "riff_favorites_sort": "manual",
   "riff_panel_blur": "10",
   "riff_viz_style": "wave",
@@ -183,6 +183,6 @@
   "riff_sidebar_custom_order": "[\"pl_mwcbyot8vrkrm\",\"pl_mwdwngsyug9wy\",\"pl_mw855tl6u5o2l\",\"pl_mw2h3wpz87sk4\",\"pl_mw8ff3muutdok\",\"pl_mwc39koz8t3dp\"]",
   "riff_cover_bg_drift": "false",
   "riff_cover_bg_speed": "12",
-  "riff_chart_country": "ru",
+  "riff_chart_country": "us",
   "riff_discord_rpc": "0"
 }

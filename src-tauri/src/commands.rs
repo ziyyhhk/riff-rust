@@ -278,6 +278,113 @@ pub fn restart_app(app: AppHandle) {
     app.restart();
 }
 
+/// OBS-style self update: every launch, check our own release feed and
+/// silently install a newer release. Runs unattended like OBS does; offline
+/// or GitHub outage just logs and the app carries on.
+#[tauri::command]
+pub async fn install_update_if_newer(app: AppHandle, state: State<'_, Shared>) -> Result<String, String> {
+    let url = "https://api.github.com/repos/ziyyhhk/riff-rust/releases/latest";
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .user_agent("riff-rust")
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+    let resp = client.get(url).send().await.map_err(|e| format!("release check: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("release api status {}", resp.status()));
+    }
+    let release: serde_json::Value = resp.json().await.map_err(|e| format!("release parse: {e}"))?;
+    let tag = release
+        .get("tag_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim_start_matches('v')
+        .trim()
+        .to_string();
+    if tag.is_empty() {
+        return Err("release has no tag".to_string());
+    }
+    let current = env!("CARGO_PKG_VERSION");
+    let key = |v: &str| v.split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
+    if key(&tag) <= key(current) {
+        return Ok(format!("up to date ({current})"));
+    }
+    let asset = release
+        .get("assets")
+        .and_then(|a| a.as_array())
+        .and_then(|a| {
+            a.iter()
+                .find(|a| {
+                    a.get("name")
+                        .and_then(|v| v.as_str())
+                        .map(|n| n.ends_with("x64-setup.exe"))
+                        .unwrap_or(false)
+                })
+                .cloned()
+        })
+        .ok_or_else(|| "release has no x64-setup asset".to_string())?;
+    let name = asset
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .unwrap_or_else(|| format!("Riff.Rust_{tag}_x64-setup.exe"));
+    let url = asset.get("browser_download_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let sha256 = asset
+        .get("digest")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim_start_matches("sha256:")
+        .to_string();
+    if url.is_empty() {
+        return Err("release asset has no url".to_string());
+    }
+    util::log_line("INFO", &format!("install_update_if_newer: downloading {name} ({tag})"));
+
+    let bytes = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("download: {e}"))?
+        .bytes()
+        .await
+        .map_err(|e| format!("download body: {e}"))?;
+    if bytes.len() < 10_000_000 {
+        return Err("update download implausibly small".to_string());
+    }
+    if !sha256.is_empty() {
+        use sha2::{Digest, Sha256};
+        let hex: String = Sha256::digest(&bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        if !sha256.eq_ignore_ascii_case(&hex) {
+            return Err(format!("update hash mismatch: expected {sha256}, got {hex}"));
+        }
+    }
+    let setup = std::env::temp_dir().join(format!("riff-rust-update-{tag}.exe"));
+    fs::write(&setup, &bytes).map_err(|e| format!("save setup: {e}"))?;
+
+    // Detached silent swap then relaunch. The ping gives the exiting process
+    // a moment to release the file before NSIS runs.
+    let installed = std::env::var("LOCALAPPDATA")
+        .map(|p| format!(r"{p}\Riff Rust\riff-rust.exe"))
+        .unwrap_or_else(|_| name.clone());
+    let bat = std::env::temp_dir().join("riff-rust-update.cmd");
+    let script = format!(
+        "@echo off\r\nping -n 2 127.0.0.1 >nul\r\n\"{setup}\" /S\r\ndel \"{setup}\"\r\nif exist \"{exe}\" start \"\" \"{exe}\"\r\ndel \"%~f0\"\r\n",
+        setup = setup.display(),
+        exe = installed,
+    );
+    fs::write(&bat, script).map_err(|e| format!("write update script: {e}"))?;
+    let mut cmd = std::process::Command::new("cmd");
+    cmd.args(["/C", &bat.to_string_lossy()]);
+    crate::util::hide_console(&mut cmd);
+    cmd.spawn().map_err(|e| format!("start updater: {e}"))?;
+    flush_storage_shadow(&state);
+    app.exit(0);
+    Ok("updating".to_string())
+}
+
 // ------------------------------------------------------------------- proxy
 
 #[tauri::command]

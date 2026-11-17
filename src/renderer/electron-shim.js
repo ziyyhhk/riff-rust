@@ -180,6 +180,9 @@
     checkForUpdates: () => invoke('check_for_updates'),
     updateAction: (action) => invoke('update_action', { action }),
     installUpdateNow: () => { invoke('check_for_updates'); return invoke('install_update_now'); },
+    // Silent self update, like OBS. Resolves once the app starts the silent
+    // installer task; the app then quits and relaunches into the new build.
+    installUpdateQuiet: () => invoke('install_update_if_newer'),
     onUpdateAvailable: (cb) => onEvent('update-available', cb),
     onUpdateDownloaded: (cb) => onEvent('update-downloaded', cb),
     onUpdateProgress: (cb) => onEvent('update-progress', cb),

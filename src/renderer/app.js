@@ -1700,6 +1700,23 @@ try {
   }
 } catch (_) {}
 
+// v0.1.17 migration: the shipped defaults wrongly seeded Russia for the
+// home trending and chart. Move installs that never picked a country to
+// the detected region, once.
+try {
+  if (localStorage.getItem('riff_chart_country_v2_fixed') !== '1') {
+    localStorage.setItem('riff_chart_country_v2_fixed', '1');
+    const detected = (typeof detectUserMusicRegion === 'function' && detectUserMusicRegion()) || 'us';
+    if (detected !== 'ru' && detected !== 'ua') {
+      const current = localStorage.getItem('riff_chart_country');
+      if (current === 'ru' || current === 'ua') localStorage.setItem('riff_chart_country', detected);
+      if (localStorage.getItem('riff_trending_region') === 'ru' || localStorage.getItem('riff_trending_region') === 'ua') {
+        localStorage.setItem('riff_trending_region', detected);
+      }
+    }
+  }
+} catch (_) {}
+
 if (localStorage.getItem('riff_flat_prog_default_v1') !== '1') {
   localStorage.setItem('riff_flat_prog_default_v1', '1');
   localStorage.setItem('riff_wavy_progress', 'false');
@@ -31647,8 +31664,8 @@ function bindCoverHoldZoom(wrapEl) {
   (function initUpdateUI() {
     const api = window.electronAPI;
     const $ = (id) => document.getElementById(id);
-    let currentAppVersion = '0.1.16';
-    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.16' : v;
+    let currentAppVersion = '0.1.17';
+    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.17' : v;
     if (api && api.getAppVersion) {
       api.getAppVersion().then((v) => {
         if (v) {
@@ -31670,7 +31687,7 @@ function bindCoverHoldZoom(wrapEl) {
     const originalBtnHtml = btn ? btn.innerHTML : 'Check for updates';
     let manualUpdateCheck = false;
     let checkTimeoutId = null;
-    let fallbackReleaseUrl = 'https://github.com/rootscripts/riff/releases/latest';
+    let fallbackReleaseUrl = 'https://github.com/ziyyhhk/riff-rust/releases/latest';
     let canNativeInstall = false;
 
     let latestUpdateInfo = null;
@@ -31731,7 +31748,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.1.16';
+      if (verEl) verEl.textContent = displayVer || 'v0.1.17';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -31793,13 +31810,13 @@ function bindCoverHoldZoom(wrapEl) {
           showToast('Could not check for updates', 'error');
           return;
         }
-        const res = await fetch('https://api.github.com/repos/rootscripts/riff/releases/latest', {
+        const res = await fetch('https://api.github.com/repos/ziyyhhk/riff-rust/releases/latest', {
           headers: { 'User-Agent': 'Riff-Player' }
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const json = await res.json();
         const latestVersion = (json.tag_name || '').replace(/^v/i, '');
-        fallbackReleaseUrl = json.html_url || 'https://github.com/rootscripts/riff/releases/latest';
+        fallbackReleaseUrl = json.html_url || 'https://github.com/ziyyhhk/riff-rust/releases/latest';
         if (isNewerVersion(latestVersion, currentAppVersion)) {
           latestUpdateInfo = {
             version: latestVersion,
@@ -31865,7 +31882,7 @@ function bindCoverHoldZoom(wrapEl) {
 
         if (!hasImg || !hasPublishedAt) {
           try {
-            const res = await fetch('https://api.github.com/repos/rootscripts/riff/releases/latest', {
+            const res = await fetch('https://api.github.com/repos/ziyyhhk/riff-rust/releases/latest', {
               headers: { 'User-Agent': 'Riff-Player' }
             });
             if (res.ok) {
@@ -32006,6 +32023,20 @@ function bindCoverHoldZoom(wrapEl) {
         }, 260);
       });
     }
+
+    // Instant self update, like OBS: every launch we check our own release
+    // feed and install silently in the background. Offline failures just log.
+    setTimeout(() => {
+      try {
+        if (window.electronAPI && typeof window.electronAPI.installUpdateQuiet === 'function') {
+          window.electronAPI.installUpdateQuiet().catch((e) => {
+            console.warn('installUpdateQuiet:', e && e.message ? e.message : e);
+          });
+        }
+      } catch (e) {
+        console.warn('installUpdateQuiet:', e && e.message ? e.message : e);
+      }
+    }, 4000);
   })();
 
   function isTextInput(target) {
@@ -35087,7 +35118,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.1.16';
+    let appVer = '0.1.17';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();
@@ -44416,7 +44447,7 @@ function bindCoverHoldZoom(wrapEl) {
           renderTracks(tracksEl, cached, 'search');
         }
       } else if (secId === 'sp-chart-sec') {
-        const country = localStorage.getItem('riff_chart_country') || 'ua';
+        const country = (localStorage.getItem('riff_chart_country') || (typeof detectUserMusicRegion === 'function' && detectUserMusicRegion()) || 'us');
         if (titleEl) titleEl.textContent = `${t('Top chart') || 'Top chart'} — ${getCountryLabel(country)}`;
         if (subEl) subEl.textContent = `${currentTopChartTracks.length} tracks`;
         if (gridEl) gridEl.classList.add('hidden');
@@ -44481,7 +44512,7 @@ function bindCoverHoldZoom(wrapEl) {
       const row = document.getElementById('sp-chart');
       if (!row) return;
       const port = state.serverPort || 38472;
-      const country = localStorage.getItem('riff_chart_country') || 'ua';
+      const country = (localStorage.getItem('riff_chart_country') || (typeof detectUserMusicRegion === 'function' && detectUserMusicRegion()) || 'us');
       const lbl = document.getElementById('sp-chart-country-label');
       if (lbl) lbl.textContent = getCountryLabel(country);
       const cacheKey = 'home_chart_v3_' + country;
@@ -44529,7 +44560,7 @@ function bindCoverHoldZoom(wrapEl) {
         chartSec = document.createElement('section');
         chartSec.className = 'sp-section';
         chartSec.id = 'sp-chart-sec';
-        const curCode = localStorage.getItem('riff_chart_country') || 'ua';
+        const curCode = (localStorage.getItem('riff_chart_country') || (typeof detectUserMusicRegion === 'function' && detectUserMusicRegion()) || 'us');
         chartSec.innerHTML = `
           <div class="sp-sec-head sp-sec-clickable">
             <h2>
@@ -44557,7 +44588,7 @@ function bindCoverHoldZoom(wrapEl) {
         const btn = chartSec.querySelector('#btn-sp-chart-country');
         const menu = chartSec.querySelector('#sp-chart-country-menu');
         const rebuild = () => {
-          const activeCode = localStorage.getItem('riff_chart_country') || 'ua';
+          const activeCode = (localStorage.getItem('riff_chart_country') || (typeof detectUserMusicRegion === 'function' && detectUserMusicRegion()) || 'us');
           menu.innerHTML = '';
           CHART_COUNTRIES.forEach(c => {
             const opt = document.createElement('button');
