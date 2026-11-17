@@ -372,7 +372,12 @@ fn handle_frame(
             true
         }
         Some("SET_ACTIVITY") | Some("ERROR") => {
-            if let Some(code) = frame.get("data").and_then(|d| d.get("code")).and_then(Value::as_i64) {
+            let error = frame.get("evt").and_then(Value::as_str) == Some("ERROR");
+            if error {
+                // A rejected activity must be visible in the log, not silent:
+                // otherwise the app looks connected while Discord shows nothing.
+                crate::util::log_line("WARN", &format!("discord rpc rejected activity: {frame}"));
+            } else if let Some(code) = frame.get("data").and_then(|d| d.get("code")).and_then(Value::as_i64) {
                 if code != 0 {
                     let message = frame
                         .get("data")
@@ -401,7 +406,7 @@ fn activity_from(value: &Value) -> Value {
         }
         if let Some(thumb) = value.get("thumbnail").and_then(Value::as_str) {
             if thumb.starts_with("https://") {
-                activity["assets"] = json!({ "large_image": thumb });
+                activity["assets"] = json!({ "large_image": thumb, "large_text": "Riff Rust" });
             }
         }
         if let Some(url) = value.get("url").and_then(Value::as_str) {
@@ -409,7 +414,6 @@ fn activity_from(value: &Value) -> Value {
                 activity["buttons"] = json!([{ "label": "Open Riff Rust", "url": url }]);
             }
         }
-        activity["status_display_type"] = json!(1);
         return activity;
     }
 
@@ -450,10 +454,9 @@ fn activity_from(value: &Value) -> Value {
     }
     if let Some(thumb) = value.get("thumbnail").and_then(Value::as_str) {
         if thumb.starts_with("https://") || thumb.starts_with("http://") {
-            activity["assets"] = json!({ "large_image": thumb });
+            activity["assets"] = json!({ "large_image": thumb, "large_text": title });
         }
     }
-    activity["status_display_type"] = json!(1);
     activity
 }
 

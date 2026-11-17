@@ -4257,14 +4257,14 @@ body.perf .playbar .time-label { transition: none !important; }
   margin: 0 !important;
   transition: background-color 150ms ease;
 }
-.setting-item:not(:has(.setting-hint)):not(:has(.setting-desc)):not(:has(details)):not(:has(input[type="text"])):not(:has(.proxy-manager-box)) {
+/* One :has() test per setting instead of five. Each separate :has() made the
+   engine re-walk every setting subtree five times when the panel opened,
+   which cost roughly 150 ms of the first paint. */
+.setting-item:not(:has(.setting-hint, .setting-desc, details, input[type="text"], .proxy-manager-box)) {
   min-height: 48px !important;
   padding: 10px 16px !important;
 }
-.setting-item:has(.setting-hint),
-.setting-item:has(.setting-desc),
-.setting-item:has(details),
-.setting-item:has(.proxy-manager-box) {
+.setting-item:has(.setting-hint, .setting-desc, details, .proxy-manager-box) {
   min-height: 60px !important;
   padding: 14px 18px !important;
 }

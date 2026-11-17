@@ -2645,6 +2645,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   window.sendBrowsingPresence = sendBrowsingPresence;
 
+  // Discord shows an activity only after the app sets one. The first track
+  // play or page change used to be the first thing we ever sent, so a freshly
+  // opened app showed no card at all. Send the current page shortly after
+  // boot and keep it fresh while nothing is playing.
+  function refreshBrowsingPresence() {
+    if (state.isPlaying) return;
+    sendBrowsingPresence(state.currentView || 'discover');
+  }
+  setTimeout(refreshBrowsingPresence, 3000);
+  setInterval(refreshBrowsingPresence, 30000);
+
   function sendDiscordRpcUpdate(track, isPlaying) {
     if (!window.electronAPI || !window.electronAPI.discordRpcUpdate) return;
     if (!track || !isPlaying) {
@@ -6276,6 +6287,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const setUnfocused = (unfocused) => {
     if (unfocused === document.body.classList.contains('unfocused')) return;
     document.body.classList.toggle('unfocused', unfocused);
+    if (typeof syncBgVideoPlayback === 'function') syncBgVideoPlayback();
   };
 
   const triggerRendererMemoryTrim = () => {
@@ -27709,7 +27721,13 @@ function bindCoverHoldZoom(wrapEl) {
   function syncBgVideoPlayback() {
     const v = document.querySelector('#custom-bg video');
     if (!v) return;
-    const hidden = document.hidden || document.body.classList.contains('perf');
+    // A looping background video decodes every frame whether or not anyone is
+    // looking at it. Stop it while the window is minimised, unfocused, hidden,
+    // or animations are off; the last frame stays on screen as a still.
+    const hidden = document.hidden
+      || !state.isWindowVisible
+      || document.body.classList.contains('perf')
+      || document.body.classList.contains('unfocused');
     if (hidden) v.pause(); else v.play().catch(() => {});
   }
   document.addEventListener('visibilitychange', syncBgVideoPlayback);
@@ -32288,6 +32306,8 @@ function bindCoverHoldZoom(wrapEl) {
       }
       if (state.discordRpcEnabled && state.isPlaying && state.currentTrack) {
         sendDiscordRpcUpdate(state.currentTrack, true);
+      } else if (state.discordRpcEnabled) {
+        refreshBrowsingPresence();
       }
       syncDiscordRpcUI();
     });

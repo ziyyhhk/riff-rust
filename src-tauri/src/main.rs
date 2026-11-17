@@ -330,10 +330,12 @@ fn main() {
             // Cap WebView2 at one renderer process for this single static page.
             // Keep wry's default feature disables explicitly (this flag overrides them).
             let window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App(start_url.into()))
-                // Software compositing keeps the GPU process near zero; a 2D
-                // music UI does not need accelerated layers and this was worth
-                // about 10 MB of private working set at idle.
-                .additional_browser_args("--renderer-process-limit=1 --enable-low-end-device-mode --disable-gpu-compositing --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection")
+                // Composite on the GPU but raster on the CPU. Full software
+                // compositing made one full window composite cost 50 to 60 ms
+                // (20 fps), while letting the GPU rasterize large panels then
+                // blocked the main thread for hundreds of ms on first paint.
+                // This keeps frames cheap without the GPU tile memory.
+                .additional_browser_args("--renderer-process-limit=1 --enable-low-end-device-mode --disable-gpu-rasterization --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection")
                 .title("Riff Rust")
                 .inner_size(win_w, win_h)
                 .position(win_x, win_y)
