@@ -168,6 +168,41 @@ fn normalized_key(title: &str, artist: &str) -> String {
     format!("{}::{}", clean(artist), clean(title))
 }
 
+/// Strip the decorators that make a remix of the same song look like its own
+/// track: parentheticals, bracketed version tags, and slowed/tekk/nightcore
+/// style suffixes. Lets the queue keep at most one cut of the same song.
+fn base_title(title: &str) -> String {
+    let mut stripped = String::with_capacity(title.len());
+    let mut depth = 0i32;
+    for ch in title.chars() {
+        match ch {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            _ => {
+                if depth <= 0 {
+                    stripped.push(ch);
+                }
+            }
+        }
+    }
+    stripped
+        .split_whitespace()
+        .filter(|word| {
+            let w = word.to_lowercase();
+            !matches!(
+                w.as_str(),
+                "slowed" | "reverb" | "tekk" | "techno" | "nightcore" | "vip" | "remix" | "edit"
+                    | "ultra" | "bass" | "boosted" | "extended" | "radio" | "sped" | "speed"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn family_key(title: &str, artist: &str) -> String {
+    normalized_key(&base_title(title), artist)
+}
+
 fn with_listener_fields(track: &mut serde_json::Map<String, Value>, index: usize) {
     let key = format!(
         "{}:{}",
@@ -757,12 +792,23 @@ pub async fn vibe(state: &Shared, body: &Value) -> Value {
         .into_iter()
         .filter_map(|v| v.as_str().map(String::from))
         .collect();
+    let avoid_keys: Vec<String> = body
+        .get("avoid")
+        .and_then(|v| v.get("keys").and_then(|v| v.as_array()).cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
     for (track, score) in candidates {
         let id = track.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let title = track.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let artist = track.get("artist").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let key = normalized_key(&title, &artist);
+        let family = family_key(&title, &artist);
         if avoid_ids.iter().any(|a| a == &id) {
+            continue;
+        }
+        if avoid_keys.iter().any(|k| k == &key || k == &family) {
             continue;
         }
         let duration = track.get("duration").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -783,14 +829,21 @@ pub async fn vibe(state: &Shared, body: &Value) -> Value {
     let mut picks: Vec<(Value, f64)> = scored.into_values().collect();
     picks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     let mut per_artist: HashMap<String, u32> = HashMap::new();
+    let mut per_family: HashMap<String, u32> = HashMap::new();
     let mut out: Vec<Value> = Vec::new();
     for (mut track, score) in picks {
         let artist = track.get("artist").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let title = track.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let count = per_artist.entry(normalize_artist(&artist)).or_insert(0);
         if *count >= 2 {
             continue;
         }
+        let fam = per_family.entry(family_key(&title, &artist)).or_insert(0);
+        if *fam >= 1 {
+            continue;
+        }
         *count += 1;
+        *fam += 1;
         let title = track.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let search_query = format!("{artist} - {title}");
         if let Some(map) = track.as_object_mut() {

@@ -6994,7 +6994,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       const albumRowHtml = matchedAlbum ? `
-        <div class="rp-credits-album-row" id="rp-credits-album-btn"><img class="rp-credits-album-cover" src="${escapeHtml(matchedAlbum.cover || '')}" alt="" onerror="this.style.display='none'" /><div class="rp-credit-person-info"><span class="rp-credit-person-roles">${escapeHtml(t('Album'))}</span><span class="rp-credits-album-name">${escapeHtml(matchedAlbum.title)}${matchedAlbum.year ? ' • ' + escapeHtml(matchedAlbum.year) : ''}</span></div></div>
+        <div class="rp-credits-album-row" id="rp-credits-album-btn"><img loading="lazy"  class="rp-credits-album-cover" src="${escapeHtml(matchedAlbum.cover || '')}" alt="" onerror="this.style.display='none'" /><div class="rp-credit-person-info"><span class="rp-credit-person-roles">${escapeHtml(t('Album'))}</span><span class="rp-credits-album-name">${escapeHtml(matchedAlbum.title)}${matchedAlbum.year ? ' • ' + escapeHtml(matchedAlbum.year) : ''}</span></div></div>
       ` : '';
 
       card.innerHTML = `
@@ -14471,7 +14471,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           </div>
           <div class="search-artist-card" role="button" tabindex="0">
             <div class="search-artist-avatar-wrap">
-              ${avatarUrl ? `<img class="search-artist-avatar" src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(artist.name)}" />` : '<div style="width:100%;height:100%;background:var(--md-sys-color-surface-container);"></div>'}
+              ${avatarUrl ? `<img loading="lazy"  class="search-artist-avatar" src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(artist.name)}" />` : '<div style="width:100%;height:100%;background:var(--md-sys-color-surface-container);"></div>'}
             </div>
             <div class="search-artist-info">
               <span class="search-artist-name">${escapeHtml(artist.name)}${artist.isVerified ? VERIFIED_CHECK_SVG : ''}</span>
@@ -15006,12 +15006,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (album.gridCovers && Array.isArray(album.gridCovers) && album.gridCovers.length >= 4) {
         coverEl.innerHTML = `
           <div class="sp-grid-cover" style="width:100%;height:100%;aspect-ratio:1;border-radius:20px;overflow:hidden;gap:3px;padding:3px;background:var(--md-sys-color-surface-container);">
-            ${album.gridCovers.slice(0, 4).map(c => `<img src="${escapeHtml(c)}" style="border-radius:8px;" />`).join('')}
+            ${album.gridCovers.slice(0, 4).map(c => `<img loading="lazy"  src="${escapeHtml(c)}" style="border-radius:8px;" />`).join('')}
           </div>
         `;
       } else {
         coverEl.innerHTML = album.cover
-          ? `<img src="${escapeHtml(album.cover)}" alt="${escapeHtml(album.title)}" style="width:100%;height:100%;aspect-ratio:1;border-radius:20px;object-fit:cover;box-shadow:none;" />`
+          ? `<img loading="lazy"  src="${escapeHtml(album.cover)}" alt="${escapeHtml(album.title)}" style="width:100%;height:100%;aspect-ratio:1;border-radius:20px;object-fit:cover;box-shadow:none;" />`
           : '<div style="width:100%;height:100%;aspect-ratio:1;border-radius:20px;background:var(--md-sys-color-surface-container);"></div>';
       }
       if (typeof bindCoverHoldZoom === 'function') bindCoverHoldZoom(coverEl);
@@ -15975,7 +15975,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           <h3 data-i18n>${typeof t === 'function' ? t('Top result') : 'Top result'}</h3>
         </div>
         <div class="search-top-result-card" id="search-top-result-card" role="button" tabindex="0">
-          <img class="search-top-result-cover" src="${escapeHtml(topThumb)}" alt="${escapeHtml(topTrack.title || '')}" onerror="this.style.display='none'" />
+          <img loading="lazy"  class="search-top-result-cover" src="${escapeHtml(topThumb)}" alt="${escapeHtml(topTrack.title || '')}" onerror="this.style.display='none'" />
           <span class="search-top-result-title" title="${escapeHtml(topTrack.title || '')}">${escapeHtml(topTrack.title || 'untitled')}</span>
           <div class="search-top-result-meta">
             <span>Song \u2022 ${escapeHtml(topTrack.artist || 'Unknown Artist')}</span>
@@ -17188,7 +17188,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const lbl = typeof t === 'function' ? t(it.label) : it.label;
       if (it.id === 'reset-audio-source' && it.isNonSearchTrack) {
         btn.innerHTML = `
-          ${it.origThumb ? `<img class="riff-ctx-thumb" src="${escapeHtml(it.origThumb)}" alt="" style="width: 32px !important; height: 32px !important; min-width: 32px !important; min-height: 32px !important; border-radius: 4px !important; object-fit: cover !important; flex-shrink: 0 !important; display: block !important; margin-right: 6px;" onerror="this.style.display='none'">` : it.icon}
+          ${it.origThumb ? `<img loading="lazy"  class="riff-ctx-thumb" src="${escapeHtml(it.origThumb)}" alt="" style="width: 32px !important; height: 32px !important; min-width: 32px !important; min-height: 32px !important; border-radius: 4px !important; object-fit: cover !important; flex-shrink: 0 !important; display: block !important; margin-right: 6px;" onerror="this.style.display='none'">` : it.icon}
           <div style="display:flex;flex-direction:column;align-items:flex-start;overflow:hidden;text-align:left;line-height:1.2;flex:1;min-width:0;">
             <span>${lbl}</span>
             <small style="display:inline-flex;align-items:center;gap:4px;font-size:10px;opacity:0.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px;">
@@ -17709,7 +17709,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       ${!isAlbum ? `
       <div class="track-row-thumb-wrap">
         <svg class="track-row-fallback-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
-        ${rowThumb ? `<img class="track-row-thumb" src="${escapeHtml(rowThumb)}" alt="" decoding="async" onerror="this.style.display='none'">` : ''}
+        ${rowThumb ? `<img loading="lazy"  class="track-row-thumb" src="${escapeHtml(rowThumb)}" alt="" decoding="async" onerror="this.style.display='none'">` : ''}
       </div>` : ''}
       <div class="track-row-info">
       <div class="track-row-title-row">
@@ -18238,7 +18238,7 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
 
     const circleHtml = `
       <div class="fav-artist-circle">
-        <img class="fav-artist-img" src="${escapeHtml(avatarSrc)}" alt="${escapeHtml(artistObj.name)}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'152\\' height=\\'152\\' fill=\\'%23333\\'><circle cx=\\'76\\' cy=\\'76\\' r=\\'76\\' fill=\\'%232a2a2a\\'/></svg>'">
+        <img loading="lazy"  class="fav-artist-img" src="${escapeHtml(avatarSrc)}" alt="${escapeHtml(artistObj.name)}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'152\\' height=\\'152\\' fill=\\'%23333\\'><circle cx=\\'76\\' cy=\\'76\\' r=\\'76\\' fill=\\'%232a2a2a\\'/></svg>'">
         <div class="fav-artist-plays"><svg viewBox="0 0 24 24"><polygon points="6 4 20 12 6 20 6 4"/></svg><span>${escapeHtml(playText)}</span></div>
         <div class="fav-artist-hover">
           <button type="button" class="fav-artist-action-btn primary btn-play-fav" title="Play ${escapeHtml(artistObj.name)}">
@@ -18780,7 +18780,7 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
       carouselEl.className = 'artist-banner-carousel';
       carouselEl.innerHTML = `
         <div class="artist-banner-track">
-          ${banners.map(u => `<img class="artist-banner-slide" src="${escapeHtml(u)}" alt="" draggable="false" />`).join('')}
+          ${banners.map(u => `<img loading="lazy"  class="artist-banner-slide" src="${escapeHtml(u)}" alt="" draggable="false" />`).join('')}
         </div>
         <div class="artist-banner-controls">
           <button type="button" class="artist-banner-nav prev" aria-label="Previous photo">&lsaquo;</button>
@@ -31708,10 +31708,10 @@ function bindCoverHoldZoom(wrapEl) {
     function parseGithubReleaseBodyAndBanner(rawNotes) {
       let text = String(rawNotes || '');
       let bannerUrl = '';
-      const htmlImgMatch = text.match(/<img[^>]+src=["'](https?:\/\/[^"']+)["'][^>]*>/i);
+      const htmlImgMatch = text.match(/<img loading="lazy" [^>]+src=["'](https?:\/\/[^"']+)["'][^>]*>/i);
       if (htmlImgMatch && htmlImgMatch[1]) {
         bannerUrl = htmlImgMatch[1].trim();
-        text = text.replace(/<img[^>]*>/gi, '');
+        text = text.replace(/<img loading="lazy" [^>]*>/gi, '');
       } else {
         const mdImgMatch = text.match(/!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/i);
         if (mdImgMatch && mdImgMatch[1]) {
@@ -31877,7 +31877,7 @@ function bindCoverHoldZoom(wrapEl) {
         latestUpdateInfo = { ...(info || {}) };
         canNativeInstall = !!info?.canInstall;
 
-        const hasImg = latestUpdateInfo.releaseNotes && /<img/i.test(latestUpdateInfo.releaseNotes);
+        const hasImg = latestUpdateInfo.releaseNotes && /<img loading="lazy" /i.test(latestUpdateInfo.releaseNotes);
         const hasPublishedAt = !!latestUpdateInfo.publishedAt;
 
         if (!hasImg || !hasPublishedAt) {
@@ -34205,7 +34205,7 @@ function bindCoverHoldZoom(wrapEl) {
         if (name) {
           googleLoginStatus.innerHTML = `
             <span class="yt-auth-user-badge">
-              ${avatar ? `<img class="yt-auth-avatar" src="${escapeHtml(avatar)}" alt="" onerror="this.style.display='none'">` : ''}
+              ${avatar ? `<img loading="lazy"  class="yt-auth-avatar" src="${escapeHtml(avatar)}" alt="" onerror="this.style.display='none'">` : ''}
               <span class="yt-auth-user-text">
                 <span class="yt-auth-user-name">${escapeHtml(name)}</span>
                 ${handle ? `<span class="yt-auth-user-handle">${escapeHtml(handle)}</span>` : ''}
@@ -34243,7 +34243,7 @@ function bindCoverHoldZoom(wrapEl) {
         if (name) {
           advStatus.innerHTML = `
             <span class="yt-auth-user-badge">
-              ${avatar ? `<img class="yt-auth-avatar" src="${escapeHtml(avatar)}" alt="" onerror="this.style.display='none'">` : ''}
+              ${avatar ? `<img loading="lazy"  class="yt-auth-avatar" src="${escapeHtml(avatar)}" alt="" onerror="this.style.display='none'">` : ''}
               <span class="yt-auth-user-text">
                 <span>Connected as <strong style="color: var(--md-sys-color-primary);">${escapeHtml(name)}</strong>${handle ? ` (${escapeHtml(handle)})` : ''}</span>
               </span>
@@ -38413,7 +38413,7 @@ function bindCoverHoldZoom(wrapEl) {
 
     card.innerHTML = `
       <div class="my-wave-track-cover-wrap">
-        <img class="my-wave-track-cover" alt="">
+        <img loading="lazy"  class="my-wave-track-cover" alt="">
         <div class="my-wave-track-play-overlay">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
         </div>
@@ -44330,7 +44330,7 @@ function bindCoverHoldZoom(wrapEl) {
           const u = res.user;
           const badgeHtml = `
             <span class="yt-auth-user-badge">
-              ${u.avatar ? `<img class="yt-auth-avatar" src="${escapeHtml(u.avatar)}" alt="" onerror="this.style.display='none'">` : ''}
+              ${u.avatar ? `<img loading="lazy"  class="yt-auth-avatar" src="${escapeHtml(u.avatar)}" alt="" onerror="this.style.display='none'">` : ''}
               <span class="yt-auth-user-text">
                 <span class="yt-auth-user-name">${escapeHtml(u.name || 'YouTube')}</span>
                 ${u.handle ? `<span class="yt-auth-user-handle">${escapeHtml(u.handle)}</span>` : ''}
