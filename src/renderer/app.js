@@ -2611,7 +2611,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.electronAPI.discordRpcSetEnabled(state.discordRpcEnabled);
   }
 
-  const DISCORD_ICON_URL = 'https://raw.githubusercontent.com/ziyyhhk/riff-rust/main/readme-hero.png';
+  const DISCORD_ICON_URL = 'https://raw.githubusercontent.com/ziyyhhk/riff-rust/main/src-tauri/icons/icon.png';
   const DISCORD_VIEW_LABELS = {
     discover: 'Browsing the home page',
     favorites: 'Browsing Liked songs',
@@ -21852,6 +21852,10 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
     if (!el.viewSettings) return;
     if (typeof resetSettingsSearch === 'function') resetSettingsSearch();
     if (settingsCloseTimer) { clearTimeout(settingsCloseTimer); settingsCloseTimer = null; }
+    // Reset the scroll position while the view is still display:none. Doing it
+    // after the view becomes visible forces a full layout of the settings tree.
+    const settingsPane = document.querySelector('#view-settings .settings-pane');
+    if (settingsPane) settingsPane.scrollTop = 0;
     // Always land on Interface when the gear is clicked. The last-used category
     // used to be restored silently, which reads as "every settings click opens
     // Account".
@@ -24538,6 +24542,7 @@ function bindCoverHoldZoom(wrapEl) {
 
   function ensureUiPackStyles() {
     let style = document.getElementById('riff-ui-pack-styles');
+    if (style && style.textContent) return;
     if (!style) {
       style = document.createElement('style');
       style.id = 'riff-ui-pack-styles';
@@ -28648,7 +28653,7 @@ function bindCoverHoldZoom(wrapEl) {
         btn.type = 'button';
         btn.className = 'app-icon-option' + (saved === item.id ? ' active' : '');
         btn.dataset.icon = item.id;
-        btn.innerHTML = '<div class="app-icon-option-box"><img src="' + resolveAppIconSrc(item.id) + '" alt="' + item.label + '" draggable="false" /></div><span class="app-icon-option-label">' + item.label + '</span>';
+        btn.innerHTML = '<div class="app-icon-option-box"><img loading="lazy" decoding="async" src="' + resolveAppIconSrc(item.id) + '" alt="' + item.label + '" draggable="false" /></div><span class="app-icon-option-label">' + item.label + '</span>';
         btn.addEventListener('click', () => applyHomeAppIcon(item.id));
         grid.appendChild(btn);
       });
@@ -29914,11 +29919,14 @@ function bindCoverHoldZoom(wrapEl) {
       s.classList.toggle('cat-hidden', s.dataset.cat !== cat);
     });
     document.querySelectorAll('#settings-nav .settings-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === cat));
-    const pane = document.querySelector('#view-settings .settings-pane'); if (pane) pane.scrollTop = 0;
     if (cat === 'custom-themes' && typeof renderThemeCards === 'function' && !document.getElementById('custom-themes-list')?.children.length) renderThemeCards();
     if (cat === 'plugins' && typeof reloadPluginsList === 'function') reloadPluginsList();
     if (cat === 'account' && typeof syncLocalAccountUI === 'function') syncLocalAccountUI();
     requestAnimationFrame(() => {
+      // Runs inside the frame that lays the new category out anyway, so the
+      // scroll reset never adds a second synchronous layout to the click.
+      const pane = document.querySelector('#view-settings .settings-pane');
+      if (pane && pane.scrollTop !== 0) pane.scrollTop = 0;
       refreshStacks();
       if (typeof syncAllThemeToggleIndicators === 'function') syncAllThemeToggleIndicators();
       if (typeof syncSlidingIndicators === 'function') syncSlidingIndicators();
@@ -39124,6 +39132,10 @@ function bindCoverHoldZoom(wrapEl) {
     }
     const img = document.createElement('img');
     img.alt = '';
+    // Cards live in scrolling shelves; deferring offscreen cover decodes keeps
+    // the decoded bitmap footprint tied to what is actually on screen.
+    img.loading = 'lazy';
+    img.decoding = 'async';
     let attempt = 0;
     img.addEventListener('error', () => {
       attempt++;
@@ -39156,6 +39168,8 @@ function bindCoverHoldZoom(wrapEl) {
       gridCovers.slice(0, 4).forEach(c => {
         const gImg = document.createElement('img');
         gImg.alt = '';
+        gImg.loading = 'lazy';
+        gImg.decoding = 'async';
         gImg.addEventListener('error', () => { gImg.style.visibility = 'hidden'; });
         gImg.src = c || '';
         grid.appendChild(gImg);
