@@ -398,7 +398,7 @@ fn activity_from(value: &Value) -> Value {
     // The renderer sends this instead of a track activity when nothing plays.
     if value.get("mode").and_then(Value::as_str) == Some("browsing") {
         let details = value.get("details").and_then(Value::as_str).unwrap_or("Riff Rust").chars().take(128).collect::<String>();
-        let mut activity = json!({ "type": 0, "details": details, "instance": false });
+        let mut activity = json!({ "type": 0, "name": "Riff Rust", "details": details, "instance": false });
         if let Some(state) = value.get("state").and_then(Value::as_str) {
             if !state.is_empty() {
                 activity["state"] = json!(state.chars().take(128).collect::<String>());
@@ -439,6 +439,7 @@ fn activity_from(value: &Value) -> Value {
         });
     let mut activity = json!({
         "type": 2,
+        "name": "Riff Rust",
         "details": title,
         "state": artist,
         "instance": false,

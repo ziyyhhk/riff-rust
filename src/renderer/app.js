@@ -8033,8 +8033,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         state.isPlaying = false;
         updatePlayPauseButton(false, false);
         if (el.trackLoadingOverlay) el.trackLoadingOverlay.classList.add('hidden');
+        // This is the message the user sees in a toast. Keep it short; the
+        // diagnostics panel and the log carry the full stack.
         const why = didTimeoutAbort ? 'Stream request timed out' : (err.message || 'Audio stream unavailable');
-        showToast(`${track && track.title ? track.title + ' — ' : ''}${why}`, 'error');
+        const shortWhy = String(why).replace(/\s+/g, ' ').trim();
+        showToast(shortWhy.length > 80 ? 'Audio stream unavailable' : shortWhy, 'error');
       }
     } finally {
       clearTimeout(fetchAbortTimeout);
@@ -13487,31 +13490,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     playTrack(state.queue[prevIdx]);
   }
 
-  if (el.nativeAudio) {
-    el.nativeAudio.addEventListener('volumechange', () => {
-      if (!el.nativeAudio) return;
-      const extMuted = !!el.nativeAudio.muted;
-      const extVol = Math.round(el.nativeAudio.volume * 100) / 100;
-      
-
-      
-
-      if (audioEngine && Number.isFinite(audioEngine.appliedElementVolume) &&
-          Math.abs(el.nativeAudio.volume - audioEngine.appliedElementVolume) < 0.005) return;
-      if (extMuted !== state.isMuted || (!extMuted && Math.abs(extVol - state.volume * state.volume) > 0.015)) {
-        state.isMuted = extMuted;
-        if (!extMuted) state.volume = Math.sqrt(extVol);
-        if (el.volumeSlider) el.volumeSlider.value = String(state.volume);
-        if (el.volumeIcon) el.volumeIcon.classList.toggle('hidden', state.isMuted);
-        if (el.volumeMutedIcon) el.volumeMutedIcon.classList.toggle('hidden', !state.isMuted);
-        persistVolumeState();
-        if (audioEngine) {
-          audioEngine.volume = state.volume;
-          audioEngine.isMuted = state.isMuted;
-        }
-      }
-    });
-
     activeStreamRecovery = null;
     function recoverCurrentStream(resumePos = 0) {
       if (syncState && syncState.active) return Promise.resolve();
@@ -13647,6 +13625,31 @@ document.addEventListener('DOMContentLoaded', async () => {
         showToast('Audio stream unavailable', 'error');
       }
     }
+
+  if (el.nativeAudio) {
+    el.nativeAudio.addEventListener('volumechange', () => {
+      if (!el.nativeAudio) return;
+      const extMuted = !!el.nativeAudio.muted;
+      const extVol = Math.round(el.nativeAudio.volume * 100) / 100;
+      
+
+      
+
+      if (audioEngine && Number.isFinite(audioEngine.appliedElementVolume) &&
+          Math.abs(el.nativeAudio.volume - audioEngine.appliedElementVolume) < 0.005) return;
+      if (extMuted !== state.isMuted || (!extMuted && Math.abs(extVol - state.volume * state.volume) > 0.015)) {
+        state.isMuted = extMuted;
+        if (!extMuted) state.volume = Math.sqrt(extVol);
+        if (el.volumeSlider) el.volumeSlider.value = String(state.volume);
+        if (el.volumeIcon) el.volumeIcon.classList.toggle('hidden', state.isMuted);
+        if (el.volumeMutedIcon) el.volumeMutedIcon.classList.toggle('hidden', !state.isMuted);
+        persistVolumeState();
+        if (audioEngine) {
+          audioEngine.volume = state.volume;
+          audioEngine.isMuted = state.isMuted;
+        }
+      }
+    });
 
     let playbackStallTimer = null;
     function clearPlaybackStallTimer() {
@@ -26894,7 +26897,7 @@ function bindCoverHoldZoom(wrapEl) {
         </div>
         <div class="support-me-content">
           <span class="support-me-title setting-name">Support me!</span>
-          <span class="support-me-desc setting-hint">Riff is created and maintained by one person. If you enjoy using it, any small tip like $1 helps keep the project going!</span>
+          <span class="support-me-desc setting-hint">Share Riff Rust with other people so the project keeps going!</span>
           <div class="support-me-actions">
             <a href="https://ko-fi.com/rootlesszen/" target="_blank" rel="noopener noreferrer" class="btn-pill-primary support-me-btn" id="btn-support-buy-coffee" style="text-decoration: none !important; border: none !important; outline: none !important;">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="flex-shrink:0;">
@@ -31629,8 +31632,8 @@ function bindCoverHoldZoom(wrapEl) {
   (function initUpdateUI() {
     const api = window.electronAPI;
     const $ = (id) => document.getElementById(id);
-    let currentAppVersion = '0.7.5';
-    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.7.5' : v;
+    let currentAppVersion = '0.1.16';
+    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.16' : v;
     if (api && api.getAppVersion) {
       api.getAppVersion().then((v) => {
         if (v) {

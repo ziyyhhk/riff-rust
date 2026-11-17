@@ -37,24 +37,29 @@
   --mesh-blur: 0px;
   --ui-alpha: 100%;
   --text-alpha: 100%;
+  /* Never let a surface go below this. At very low interface opacity the
+     background image bled through every panel in a different tint, which read
+     as random colors everywhere. The photo still shows through, panels stay
+     uniform and text stays readable. */
+  --surface-alpha: max(var(--ui-alpha), 62%);
   --md-sys-color-background-solid: #121214;
-  --md-sys-color-background: color-mix(in srgb, #121214 var(--ui-alpha), transparent);
+  --md-sys-color-background: color-mix(in srgb, #121214 var(--surface-alpha), transparent);
   --md-sys-color-surface-solid: #121214;
-  --md-sys-color-surface: color-mix(in srgb, #121214 var(--ui-alpha), transparent);
+  --md-sys-color-surface: color-mix(in srgb, #121214 var(--surface-alpha), transparent);
   --md-sys-color-surface-dim-solid: #121214;
-  --md-sys-color-surface-dim: color-mix(in srgb, #121214 var(--ui-alpha), transparent);
+  --md-sys-color-surface-dim: color-mix(in srgb, #121214 var(--surface-alpha), transparent);
   --md-sys-color-surface-bright-solid: #38383A;
-  --md-sys-color-surface-bright: color-mix(in srgb, #38383A var(--ui-alpha), transparent);
+  --md-sys-color-surface-bright: color-mix(in srgb, #38383A var(--surface-alpha), transparent);
   --md-sys-color-surface-container-lowest-solid: #0D0E0F;
-  --md-sys-color-surface-container-lowest: color-mix(in srgb, #0D0E0F var(--ui-alpha), transparent);
+  --md-sys-color-surface-container-lowest: color-mix(in srgb, #0D0E0F var(--surface-alpha), transparent);
   --md-sys-color-surface-container-low-solid: #1A1B1E;
-  --md-sys-color-surface-container-low: color-mix(in srgb, #1A1B1E var(--ui-alpha), transparent);
+  --md-sys-color-surface-container-low: color-mix(in srgb, #1A1B1E var(--surface-alpha), transparent);
   --md-sys-color-surface-container-solid: #1E1F22;
-  --md-sys-color-surface-container: color-mix(in srgb, #1E1F22 var(--ui-alpha), transparent);
+  --md-sys-color-surface-container: color-mix(in srgb, #1E1F22 var(--surface-alpha), transparent);
   --md-sys-color-surface-container-high-solid: #28292C;
-  --md-sys-color-surface-container-high: color-mix(in srgb, #28292C var(--ui-alpha), transparent);
+  --md-sys-color-surface-container-high: color-mix(in srgb, #28292C var(--surface-alpha), transparent);
   --md-sys-color-surface-container-highest-solid: #333438;
-  --md-sys-color-surface-container-highest: color-mix(in srgb, #333438 var(--ui-alpha), transparent);
+  --md-sys-color-surface-container-highest: color-mix(in srgb, #333438 var(--surface-alpha), transparent);
 
   --md-sys-color-primary: #5247d1;
   --md-sys-color-on-primary: #ffffff;
@@ -5579,15 +5584,17 @@ body.perf .toast-row.row-leaving {
 .toast-row.warning .toast-icon { color: #f9a825; }
 .toast-row.error .toast-icon { color: var(--md-sys-color-error, #ff5449); }
 
+/* Long errors used to be clipped to one line with an ellipsis, which made
+   failure messages unreadable. Wrap to a few lines instead. */
 .toast-row .toast-text {
   flex: 1;
   color: var(--md-sys-color-on-surface);
   font-size: 15px;
   font-weight: 500;
   max-width: 420px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
 }
 .toast-badge {
   font-size: 11px;
@@ -12411,8 +12418,8 @@ body[data-theme="light"] {
 body.cover-bg-on,
 body.has-video-bg,
 body.has-custom-bg {
-  --page-bg: color-mix(in srgb, var(--page-solid) var(--ui-alpha, 50%), transparent);
-  --panel-bg: color-mix(in srgb, color-mix(in srgb, var(--page-solid) 96%, white 4%) calc(var(--ui-alpha, 50%) + 3%), transparent);
+  --page-bg: color-mix(in srgb, var(--page-solid) max(var(--ui-alpha, 50%), 62%), transparent);
+  --panel-bg: color-mix(in srgb, color-mix(in srgb, var(--page-solid) 96%, white 4%) max(calc(var(--ui-alpha, 50%) + 3%), 65%), transparent);
   --bar-editor-bg: var(--panel-bg);
 }
 
