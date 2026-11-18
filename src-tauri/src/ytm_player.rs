@@ -96,7 +96,7 @@ pub async fn visitor_data(state: &Arc<AppState>) -> Option<String> {
             }
         }
     }
-    let client = state.http();
+    let client = state.streaming_http();
     let resp = client
         .get("https://www.youtube.com/sw.js_data")
         .header("User-Agent", GOOGLEBOT_UA)
@@ -166,7 +166,7 @@ fn pick_audio_url(data: &Value, quality: &str) -> Option<String> {
 // a new player, so it is scraped from watch page -> base.js and cached 24 h.
 const VISIONOS_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
 const PLAYER_CTX_TTL_SECS: u64 = 60 * 60 * 24;
-const PAGE_TIMEOUT_SECS: u64 = 8;
+const PAGE_TIMEOUT_SECS: u64 = 30;
 
 static VISIONOS_CONTEXT: Mutex<Option<(u32, String, Instant)>> = Mutex::new(None);
 
@@ -175,6 +175,46 @@ fn extract_between<'a>(hay: &'a str, start: &str, end: char) -> Option<&'a str> 
     let tail = &hay[idx + start.len()..];
     let end_idx = tail.find(end)?;
     Some(&tail[..end_idx])
+}
+
+/// GET a URL and return at most `max_bytes` of the body. Uses a Range request;
+/// if the origin ignores it and streams the full body, the connection is hung
+/// up right after `max_bytes` are collected — the watch page embeds everything
+/// we need in its first ~62 KB, and the player JS carries `signatureTimestamp`
+/// at ~65 KB, so the whole 1.3 MB/3 MB bodies never have to cross the wire.
+async fn fetch_prefix(
+    client: &reqwest::Client,
+    url: &str,
+    user_agent: &str,
+    max_bytes: usize,
+    timeout: Duration,
+) -> Option<Vec<u8>> {
+    let resp = client
+        .get(url)
+        .header("User-Agent", user_agent)
+        .header("Range", format!("bytes=0-{}", max_bytes.saturating_sub(1)))
+        .timeout(timeout)
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+        return None;
+    }
+    let mut buf: Vec<u8> = Vec::with_capacity(max_bytes);
+    let mut stream = resp.bytes_stream();
+    while (buf.len() as u64) < max_bytes as u64 {
+        match futures_util::StreamExt::next(&mut stream).await {
+            Some(Ok(chunk)) => {
+                let take = (max_bytes - buf.len()).min(chunk.len());
+                buf.extend_from_slice(&chunk[..take]);
+            }
+            Some(Err(_)) | None => break,
+        }
+    }
+    if buf.is_empty() {
+        return None;
+    }
+    Some(buf)
 }
 
 /// www.youtube.com/watch…embeds the player file as "/s/player/<key>/<variant>/base.js".
@@ -199,6 +239,7 @@ fn extract_visitor_data(page: &str) -> Option<String> {
     extract_between(page, "\"visitorData\":\"", '"').map(str::to_string)
 }
 
+/// Full-text fallback for files whose markers were not found in the prefix cap.
 async fn fetch_text(client: &reqwest::Client, url: &str) -> Option<String> {
     let resp = client
         .get(url)
@@ -213,7 +254,10 @@ async fn fetch_text(client: &reqwest::Client, url: &str) -> Option<String> {
     resp.text().await.ok()
 }
 
-/// (signatureTimestamp, visitorData) from the watch page + player JS, cached for a day.
+const PREFIX_PAGE_BYTES: usize = 256 * 1024;
+const PREFIX_PLAYER_BYTES: usize = 768 * 1024;
+
+/// (signatureTimestamp, visitorData) from the watch page + player JS prefix, cached for a day.
 async fn visionos_context(video_id: &str, client: &reqwest::Client) -> Option<(u32, Option<String>)> {
     {
         let guard = VISIONOS_CONTEXT.lock().ok()?;
@@ -224,10 +268,25 @@ async fn visionos_context(video_id: &str, client: &reqwest::Client) -> Option<(u
         }
     }
     let page_url = format!("https://www.youtube.com/watch?v={video_id}&bpctr=9999999999&has_verified=1");
-    let page = fetch_text(client, &page_url).await?;
+    let page_bytes = fetch_prefix(client, &page_url, VISIONOS_UA, PREFIX_PAGE_BYTES, Duration::from_secs(PAGE_TIMEOUT_SECS)).await?;
+    let page = String::from_utf8_lossy(&page_bytes).to_string();
+    let page = if page.find("/s/player/").is_some() && page.find("\"visitorData\":\"").is_some() {
+        page
+    } else {
+        // Prefix did not carry the markers (page layout changed) — fetch the whole thing.
+        fetch_text(client, &page_url).await?
+    };
     let player_url = extract_player_url(&page)?;
-    let player_js = fetch_text(client, &player_url).await?;
-    let sts = extract_signature_timestamp(&player_js)?;
+    let js_bytes = fetch_prefix(client, &player_url, VISIONOS_UA, PREFIX_PLAYER_BYTES, Duration::from_secs(PAGE_TIMEOUT_SECS)).await?;
+    let js = String::from_utf8_lossy(&js_bytes).to_string();
+    let sts = match extract_signature_timestamp(&js) {
+        Some(sts) => sts,
+        None => {
+            // sts not in the prefix — pull the full file before giving up.
+            let full = fetch_text(client, &player_url).await?;
+            extract_signature_timestamp(&full)?
+        }
+    };
     let visitor = extract_visitor_data(&page).unwrap_or_default();
     if let Ok(mut guard) = VISIONOS_CONTEXT.lock() {
         *guard = Some((sts, visitor.clone(), Instant::now()));
@@ -250,7 +309,7 @@ pub async fn visionos_audio_url(
     {
         return None;
     }
-    let client = state.http();
+    let client = state.streaming_http();
     let (sts, visitor) = visionos_context(video_id, &client).await?;
     let mut client_ctx = json!({
         "clientName": "VISIONOS",
@@ -319,7 +378,7 @@ pub async fn direct_audio_url(video_id: &str, quality: &str, state: &Arc<AppStat
         return None;
     }
     let visitor = visitor_data(state).await.unwrap_or_default();
-    let client = state.http();
+    let client = state.streaming_http();
 
     for client_spec in CLIENTS {
         let mut ctx_client = json!({

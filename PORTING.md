@@ -21,7 +21,7 @@ The Electron main process and Node server were replaced with Rust.
 | Audio DSP / EQ / visualizers | Web Audio API + WebGL (renderer) | **unchanged** — runs in the webview |
 | Data dir | `%LOCALAPPDATA%\Riff` | `%LOCALAPPDATA%\Riff Rust` |
 
-## What works today (v0.1.8)
+## What works today (v0.1.19)
 
 - ✅ Same UI (styles.css, index.html, app.js, themes, assets)
 - ✅ First-run onboarding wizard — identical flow to upstream (language → look → make it yours → launcher → connect), shown only when `.rifftutorial` is absent (same existence-only marker as upstream)
@@ -78,8 +78,49 @@ The Electron main process and Node server were replaced with Rust.
   through YTM), `/api/artist` (Deezer top tracks/albums/fans + Last.fm bio & monthly listeners).
   The home page now fills like upstream: For You / Trending / Top chart.
 - ✅ Discord Rich Presence: IPC named pipe discord-ipc-{0..9}, READY handshake, SET_ACTIVITY with track title/artist/duration/thumbnail/Listen button, PING-PONG, 15s reconnect.
-- 🟡 Plugin execution: listable/toggleable, but sandboxed runner not built
+- 🟢 Plugins **execute renderer-side** (v0.1.19), like upstream: `list_plugins` ships the
+  source (≤256 KB) plus JSDoc-ish header metadata (`@name`/`@author`/`@version`/`@description`)
+  and the renderer builds them with `new Function('Riff', 'plugin', code)`. There is no
+  Rust-side JS runtime; plugin trust model = user-installed code, same as upstream.
+
+## Fixed in v0.1.19
+
+- **Custom data directory actually works now.** The override was written to `config.json["dataDir"]` but nothing ever read it. v0.1.19 adds a fixed-location bootstrap pointer (`%LOCALAPPDATA%\Riff Rust Boot\data-dir.json`, outside the data dir) which `data_dir()` reads (memoized per process). `set_data_dir` writes the pointer **after** the file copy succeeds (and now copies `config.json` too, into a 13-entry list), returns `requiresRestart:true`, and `get_data_dir` reports `isCustom` truthfully. A moved/missing pointer target falls back to the platform default with one WARN, never a panic, never deletes data. Take effect: next launch.
+- `/api/state`, `/api/save-track-source`, `/api/save-default-settings` no longer return
+  misleading success/error responses: karaoke `/api/state` now stores the now-playing payload;
+  track-source resolution persists to `<dataDir>/track-sources.json` (cap 5000 entries, oldest
+  evicted); settings backup writes `<dataDir>/defaults-saved.json` atomically (512 KB / 2000 key
+  cap). `/api/save-default-settings` is no longer "read-only error" theater.
+- `unwrap()` panics removed from `/api/local-thumbnail`, `/api/image-proxy`, `/api/audio-proxy`
+  (and a poisoned-lock `.unwrap()` in `/api/download`) — failures return HTTP 500 JSON instead.
+- `/api/trending`, `/api/hot`, `/api/top-chart` fail closed (`success:false`, `tracks:[]`) when
+  every source fails, instead of caching/serving empty charts as success; empty cached charts
+  are no longer served. Renderer falls back to a cached chart or hides the section.
+- `offline_library` shows real title/artist from ID3 tags for cached MP3s (10 min tag cache)
+  instead of the bare video id.
+- `best_search_hit` no longer borrows `hits[0]`; empty-input is a first-class `None`.
+- Last.fm API key unified onto one constant (was two different embedded keys).
+- Renderer: list/sidebar thumbnails request `w128` CDN copies instead of `w544`
+  (≈18x fewer decoded pixels per row), rows skip layout/paint off-screen
+  (`content-visibility: auto` + `contain-intrinsic-size`), `decoding="async"` added,
+  dead code removed.
+- WebView2: dropped the Android/ChromeOS-only `--enable-low-end-device-mode` placebo flag;
+  added `--disable-background-networking --disable-component-update --disable-domain-reliability
+  --no-pings`; the WebView2 memory usage target stays `LOW` permanently (measured: `NORMAL`
+  while visible filled the webview working sets to ~590 MB tree on this machine with no
+  frame-pacing benefit; 0.1.17/0.1.18 shipped always-`LOW` at ~99–115 MB and held 60 fps).
+- Full honesty note: **40 MB was a fantasy target.** The floor is the WebView2 process
+  group (browser + renderer + GPU + audio service); 0.1.17 measured ~96 MB and 0.1.18 ~99–115 MB
+  whole-tree on this machine. v0.1.19 reduces what is legitimately reducible (decode work,
+  paint, background noise); the release notes carry the measured post-build figure instead
+  of a promised one.
+- Unused `assets/Tone.js` (~345 KB) removed.
+
+## Partial / still 🟡 (v0.1.19)
+
 - 🟡 Proxy config: stored and applied to yt-dlp + server-side fetches; no per-route test UI wiring
+- i18n/translation batch API is implemented (`/api/i18n-batch`: DeepL → Google gtx → MyMemory);
+  `/api/translate` remains an honest stub.
 
 ## Not yet ported ❌ (returns `{ success: false, "error": "not yet ported" }`)
 
@@ -87,9 +128,11 @@ The Electron main process and Node server were replaced with Rust.
 - Spotify integration (auth, personal library) — but **public playlist import works**
 - Apple Music, Deezer, Yandex, TikTok, VK playlist import
 - Last.fm (scrobbling, token flow; only used anonymously for artist bio/listeners)
-- i18n/translation batch API, karaoke word-level lyrics (`/api/lyrics-words`)
+- Karaoke word-level lyrics ARE ported (`/api/lyrics-words`, NetEase yrc); `/api/translate` is an honest stub while `/api/i18n-batch` works (DeepL → Google gtx → MyMemory).
 - Audio editor/trim/region-embed pipeline (editor UI loads, but backend trim export is unported)
-- Auto-updater (no release feed configured for Riff Rust yet)
+- Self-updater exists but releases are manual: CI builds the NSIS installer as an artifact and
+  never publishes; the in-app updater checks `ziyyhhk/riff-rust`'s latest release, so it works,
+  but every update ships via a hand-made release.
 - Playlist context menus (native); launcher integration outside Windows
 - Export/import of the encrypted account file (`RFAC` format)
 
@@ -171,4 +214,9 @@ edits to the renderer must happen in `src/renderer`, then re-run assemble.
 
 ## Data location
 
-`%LOCALAPPDATA%\Riff Rust\` (library/, tracks/, local-covers/, logs/, storage.json, config.json, library.json)
+`%LOCALAPPDATA%\Riff Rust\` (library/, tracks/, local-covers/, logs/, storage.json, config.json, library.json).
+A custom data directory, set via the app settings or `set_data_dir`, is honoured from the next
+launch through a fixed-location bootstrap pointer at `%LOCALAPPDATA%\Riff Rust Boot\data-dir.json`
+(macOS/Linux equivalents documented in `util.rs`). The pointer lives outside the data dir on
+purpose; if it goes missing or unusable, the app falls back to the default data dir with one
+WARN and never deletes anything.

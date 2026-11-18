@@ -14794,6 +14794,9 @@ body:not(.track-rows-compact) :is(.track-row-thumb-wrap, .track-row-thumb) {
   height: 46px !important;
   border-radius: 6px !important;
 }
+body.track-rows-compact .track-row:not(:has(.track-unavail-wrap)) {
+  contain-intrinsic-size: auto 54px;
+}
 body.track-rows-compact .track-row {
   min-height: 54px !important;
   padding: 6px 16px !important;
@@ -16854,8 +16857,13 @@ body:not(.perf) :is(#favorites-tracks-list, #playlist-tracks-list, #artist-popul
   animation: riffTrackRowSlideOut 260ms cubic-bezier(0.22, 1, 0.36, 1) forwards !important;
   pointer-events: none !important;
 }
-.track-row {
-  content-visibility: visible;
+/* Off-screen rows skip layout/paint. Guarded by :not(:has(...)) because the
+   unavailable-track tooltip in playlist rows paints above the row's top edge
+   and would be clipped by content-visibility's paint containment.
+   contain-intrinsic-size matches the real row heights (64px default token). */
+.track-row:not(:has(.track-unavail-wrap)) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 68px;
 }
 
 

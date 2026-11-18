@@ -1,9 +1,46 @@
 use std::fs;
 use std::path::PathBuf;
 
+/// `%LOCALAPPDATA%\Riff Rust Boot\data-dir.json` (Windows),
+/// `~/Library/Application Support/Riff Rust Boot/data-dir.json` (macOS),
+/// `$XDG_DATA_HOME/riff-rust-boot/data-dir.json` or `~/.local/share/riff-rust-boot/data-dir.json`
+/// (Linux). Fixed per-user location for the bootstrap pointer. It deliberately lives
+/// OUTSIDE the data directory: the pointer says where the data dir is, so it cannot
+/// live inside it (chicken and egg).
+pub fn bootstrap_pointer_path() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            return PathBuf::from(local).join("Riff Rust Boot").join("data-dir.json");
+        }
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            return PathBuf::from(profile).join("AppData\\Local\\Riff Rust Boot\\data-dir.json");
+        }
+        PathBuf::from("Riff Rust Boot").join("data-dir.json")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(home).join("Library/Application Support/Riff Rust Boot/data-dir.json");
+        }
+        PathBuf::from("Riff Rust Boot/data-dir.json")
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+            return PathBuf::from(xdg).join("riff-rust-boot/data-dir.json");
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(home).join(".local/share/riff-rust-boot/data-dir.json");
+        }
+        PathBuf::from("riff-rust-boot/data-dir.json")
+    }
+}
+
+/// Platform default data dir; the bootstrap pointer is NOT consulted.
 /// `%LOCALAPPDATA%\Riff Rust` (Windows), `~/Library/Application Support/Riff Rust` (macOS),
 /// `~/.local/share/Riff Rust` (Linux). Mirrors Riff's data-dir convention but under the new name.
-pub fn data_dir() -> PathBuf {
+pub fn default_data_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
@@ -31,6 +68,67 @@ pub fn data_dir() -> PathBuf {
         }
         PathBuf::from("Riff Rust")
     }
+}
+
+/// Read the bootstrap pointer's `dataDir` value, if the pointer exists and parses.
+/// Does not validate that the target is usable; `data_dir()` does that.
+pub fn read_data_dir_pointer() -> Option<String> {
+    let raw = fs::read_to_string(bootstrap_pointer_path()).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let dir = parsed
+        .get("dataDir")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("");
+    if dir.is_empty() {
+        None
+    } else {
+        Some(dir.to_string())
+    }
+}
+
+/// The directory the app reads and writes. When the bootstrap pointer
+/// (`bootstrap_pointer_path()`) names a directory that exists or can be created,
+/// that directory wins; otherwise the platform default is used and a WARN is
+/// logged (via `log_line`). Never panics, never deletes anything.
+///
+/// Memoized for the process lifetime: a changed pointer takes effect on the
+/// next launch, not mid-run. That is the honest semantics of the original
+/// env-derived design too (a new env var never moved the dir mid-process either).
+pub fn data_dir() -> PathBuf {
+    static DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    static POINTER_WARN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    static POINTER_WARN_LOGGED: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    let dir = DATA_DIR
+        .get_or_init(|| {
+            if let Some(custom) = read_data_dir_pointer() {
+                let candidate = PathBuf::from(&custom);
+                // create_dir_all succeeds for an existing dir too, so this covers
+                // both "pointer target exists" and "target can be created".
+                match fs::create_dir_all(&candidate) {
+                    Ok(()) => return candidate,
+                    Err(e) => {
+                        let _ = POINTER_WARN.set(format!(
+                            "bootstrap pointer {custom:?} is unusable ({e}); falling back to the default data dir"
+                        ));
+                    }
+                }
+            }
+            default_data_dir()
+        })
+        .clone();
+    // Logged here, after the OnceLock initializer has returned: log_line() goes
+    // through logs_dir() -> data_dir(), which would re-enter the initializing
+    // OnceLock on this thread. Exactly one WARN is emitted per process.
+    if !POINTER_WARN_LOGGED.load(std::sync::atomic::Ordering::Relaxed) {
+        if let Some(message) = POINTER_WARN.get() {
+            if !POINTER_WARN_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                log_line("WARN", message);
+            }
+        }
+    }
+    dir
 }
 
 pub fn library_dir() -> PathBuf {

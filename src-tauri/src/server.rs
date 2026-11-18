@@ -27,6 +27,48 @@ pub type Shared = Arc<AppState>;
 
 const NOT_PORTED: &str = "not yet ported in Riff Rust v0.1";
 
+/// Tag metadata for cached MP3s, so the offline list shows real titles instead
+/// of bare video ids. Keyed by full path; entries older than 10 minutes are
+/// re-read on next access.
+static CACHE_TAG_CACHE: OnceLock<StdMutex<HashMap<String, (String, String, Instant)>>> = OnceLock::new();
+
+/// Latest karaoke now-playing payload POSTed by the renderer to `/api/state`.
+static LAST_STATE: OnceLock<StdMutex<Value>> = OnceLock::new();
+
+fn cached_mp3_tags(path: &PathBuf) -> (String, String) {
+    let key = path.to_string_lossy().to_string();
+    let map = CACHE_TAG_CACHE.get_or_init(|| StdMutex::new(HashMap::new()));
+    if let Ok(guard) = map.lock() {
+        if let Some((title, artist, at)) = guard.get(&key) {
+            if at.elapsed() < Duration::from_secs(600) {
+                return (title.clone(), artist.clone());
+            }
+        }
+    }
+    let (title, artist, _album, _duration, _cover) = library::read_tags(path);
+    let entry = (title.trim().to_string(), artist.trim().to_string(), Instant::now());
+    if let Ok(mut guard) = map.lock() {
+        // Bounded: drop stale entries first, then oldest, so the map cannot
+        // grow without limit across a long session.
+        if guard.len() >= 256 {
+            guard.retain(|_, (_, _, at)| at.elapsed() < Duration::from_secs(600));
+            while guard.len() >= 256 {
+                if let Some(oldest_key) = guard
+                    .iter()
+                    .min_by_key(|(_, (_, _, at))| *at)
+                    .map(|(k, _)| k.clone())
+                {
+                    guard.remove(&oldest_key);
+                } else {
+                    break;
+                }
+            }
+        }
+        guard.insert(key, entry.clone());
+    }
+    (entry.0, entry.1)
+}
+
 fn qp(q: &HashMap<String, String>, key: &str) -> String {
     q.get(key).cloned().unwrap_or_default()
 }
@@ -70,12 +112,14 @@ fn match_key(value: &str) -> String {
 
 /// Search results are ranked by relevance already, but the first hit for an
 /// album row can still be a cover/karaoke upload. Prefer a hit whose title and
-/// artist match the row, and penalise obvious substitutes.
-fn best_search_hit<'a>(hits: &'a [Value], title: &str, artist: &str) -> &'a Value {
+/// artist match the row, and penalise obvious substitutes. Returns the
+/// highest-scoring hit, or `None` when the list is empty, so callers never
+/// have to trust a non-empty slice.
+fn best_search_hit<'a>(hits: &'a [Value], title: &str, artist: &str) -> Option<&'a Value> {
     let wanted_title = match_key(title);
     let wanted_title_prefix: String = wanted_title.chars().take(12).collect();
     let wanted_artist = match_key(artist);
-    let mut best = &hits[0];
+    let mut best: Option<&'a Value> = None;
     let mut best_score = i32::MIN;
 
     for hit in hits {
@@ -118,9 +162,9 @@ fn best_search_hit<'a>(hits: &'a [Value], title: &str, artist: &str) -> &'a Valu
             }
         }
 
-        if score > best_score {
+        if best.is_none() || score > best_score {
             best_score = score;
-            best = hit;
+            best = Some(hit);
         }
     }
 
@@ -1098,12 +1142,10 @@ async fn youtube_search_fallback(
         return None;
     }
     match ytm::search(&state.http(), &query, 3).await {
-        Ok(hits) if !hits.is_empty() => {
-            let hit = best_search_hit(&hits, title, artist);
-            hit.get("id")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        }
+        Ok(hits) if !hits.is_empty() => best_search_hit(&hits, title, artist)
+            .and_then(|hit| hit.get("id"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
         Ok(_) => None,
         Err(e) => {
             util::log_line(
@@ -1811,10 +1853,13 @@ async fn local_thumbnail(State(_state): State<Shared>, Query(q): Query<HashMap<S
         let p = util::covers_dir().join(format!("{id}.{ext}"));
         if p.is_file() {
             if let Ok(bytes) = fs::read(&p) {
-                return Response::builder()
+                return match Response::builder()
                     .header(axum::http::header::CONTENT_TYPE, util::mime_from_ext(ext))
                     .body(Body::from(bytes))
-                    .unwrap();
+                {
+                    Ok(resp) => resp,
+                    Err(_) => json_err(StatusCode::INTERNAL_SERVER_ERROR, "internal error"),
+                };
             }
         }
     }
@@ -1899,11 +1944,21 @@ async fn offline_library(State(_state): State<Shared>) -> Response {
             }
             let size = path.metadata().map(|m| m.len()).unwrap_or(0);
             total_bytes += size;
+            // Real tags for playable MP3s; anything else falls back to the stem.
+            let mut title = stem.clone();
+            let mut artist = String::new();
+            if ext.eq_ignore_ascii_case("mp3") {
+                let (tag_title, tag_artist) = cached_mp3_tags(&path);
+                if !tag_title.is_empty() {
+                    title = tag_title;
+                }
+                artist = tag_artist;
+            }
             out.push(json!({
                 "id": stem,
                 "cleanId": stem,
-                "title": stem,
-                "artist": "",
+                "title": title,
+                "artist": artist,
                 "duration": 0,
                 "ext": ext,
                 "fileSize": size,
@@ -1985,7 +2040,7 @@ async fn download(State(state): State<Shared>, Query(q): Query<HashMap<String, S
     let dest_dir = if !custom_dir.trim().is_empty() {
         PathBuf::from(custom_dir.trim())
     } else if !state.download_dir.lock().map(|d| d.clone()).unwrap_or_default().trim().is_empty() {
-        PathBuf::from(state.download_dir.lock().unwrap().clone())
+        PathBuf::from(state.download_dir.lock().map(|d| d.clone()).unwrap_or_default())
     } else {
         #[cfg(target_os = "windows")]
         {
@@ -2256,12 +2311,15 @@ async fn image_proxy(State(state): State<Shared>, Query(q): Query<HashMap<String
                 .unwrap_or("image/jpeg")
                 .to_string();
             match resp.bytes().await {
-                Ok(bytes) => Response::builder()
+                Ok(bytes) => match Response::builder()
                     .status(if status.is_success() { StatusCode::OK } else { StatusCode::BAD_GATEWAY })
                     .header(axum::http::header::CONTENT_TYPE, content_type)
                     .header(axum::http::header::CACHE_CONTROL, "public, max-age=86400")
                     .body(Body::from(bytes))
-                    .unwrap(),
+                {
+                    Ok(resp) => resp,
+                    Err(_) => json_err(StatusCode::INTERNAL_SERVER_ERROR, "internal error"),
+                },
                 Err(_) => json_err(StatusCode::BAD_GATEWAY, "failed to read image"),
             }
         }
@@ -2288,7 +2346,7 @@ async fn audio_proxy(State(state): State<Shared>, Query(q): Query<HashMap<String
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("audio/mp4")
                 .to_string();
-            // Forward length/range metadata â€” WebView2's media pipeline needs
+            // Forward length/range metadata - WebView2's media pipeline needs
             // them to demux MP4 progressively; without Content-Range the
             // element reports MEDIA_ERR_SRC_NOT_SUPPORTED ("Format error").
             let content_length = resp.content_length();
@@ -2316,13 +2374,31 @@ async fn audio_proxy(State(state): State<Shared>, Query(q): Query<HashMap<String
             if let Some(content_range) = content_range {
                 builder = builder.header(axum::http::header::CONTENT_RANGE, content_range);
             }
-            builder.body(Body::from_stream(stream)).unwrap()
+            match builder.body(Body::from_stream(stream)) {
+                Ok(resp) => resp,
+                Err(_) => json_err(StatusCode::INTERNAL_SERVER_ERROR, "internal error"),
+            }
         }
         Err(_) => json_err(StatusCode::BAD_GATEWAY, "stream fetch failed"),
     }
 }
 
 // --------------------------------------------------------------- defaults
+
+/// Lowercase, trim, collapse whitespace and drop a trailing "- topic" (the
+/// YouTube Music auto-generated artist channel suffix).
+fn normalize_source_component(value: &str) -> String {
+    let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+    match collapsed.strip_suffix("- topic") {
+        Some(stripped) => stripped.trim_end().to_string(),
+        None => collapsed,
+    }
+}
+
+/// Merge key for `track-sources.json`: `artist|title` after normalization.
+fn normalize_source_key(artist: &str, title: &str) -> String {
+    format!("{}|{}", normalize_source_component(artist), normalize_source_component(title))
+}
 
 async fn default_settings(State(_state): State<Shared>) -> Response {
     const DEFAULTS: &str = include_str!("../../src/renderer/defaults.json");
@@ -2332,16 +2408,115 @@ async fn default_settings(State(_state): State<Shared>) -> Response {
     }
 }
 
-async fn save_default_settings(State(_state): State<Shared>, Json(_body): Json<Value>) -> Response {
-    json_ok(json!({ "success": false, "error": "default settings are read-only" }))
+async fn save_default_settings(State(_state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let Some(defaults) = body.get("defaults").and_then(Value::as_object) else {
+        return json_err(StatusCode::BAD_REQUEST, "missing defaults object");
+    };
+    if defaults.len() > 2000 {
+        return json_err(StatusCode::BAD_REQUEST, "too many keys in defaults");
+    }
+    // The Json extractor already parsed the body; re-serializing gives a fair
+    // approximation of the wire size for the 512 KB gate.
+    if serde_json::to_vec(&body).map(|bytes| bytes.len()).unwrap_or(usize::MAX) > 512 * 1024 {
+        return json_err(StatusCode::PAYLOAD_TOO_LARGE, "defaults payload too large");
+    }
+    let path = util::data_dir().join("defaults-saved.json");
+    if let Some(parent) = path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            util::log_line("ERROR", &format!("save_default_settings: create dir failed: {e}"));
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, "failed to write defaults");
+        }
+    }
+    let serialized = match serde_json::to_string_pretty(&Value::Object(defaults.clone())) {
+        Ok(s) => s,
+        Err(e) => {
+            util::log_line("ERROR", &format!("save_default_settings: serialize failed: {e}"));
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, "failed to write defaults");
+        }
+    };
+    // Overwrite atomically via temp + rename; fall back to a plain write.
+    let tmp = PathBuf::from(format!("{}.tmp", path.to_string_lossy()));
+    let mut result = fs::write(&tmp, &serialized).and_then(|_| {
+        let _ = fs::remove_file(&path);
+        fs::rename(&tmp, &path)
+    });
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+        result = fs::write(&path, &serialized);
+    }
+    if let Err(e) = result {
+        util::log_line("ERROR", &format!("save_default_settings: write {} failed: {e}", path.display()));
+        return json_err(StatusCode::INTERNAL_SERVER_ERROR, "failed to write defaults");
+    }
+    json_ok(json!({ "success": true, "path": path.to_string_lossy().to_string() }))
 }
 
-async fn save_track_source(State(_state): State<Shared>, Json(_body): Json<Value>) -> Response {
-    // Source-metadata persistence for downloaded tracks lands with the download cache in a later milestone.
-    json_ok(json!({ "success": true }))
+async fn save_track_source(State(_state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let artist = body.get("artist").and_then(Value::as_str).unwrap_or("");
+    let title = body.get("title").and_then(Value::as_str).unwrap_or("");
+    let resolved_id = body.get("resolvedId").and_then(Value::as_str).unwrap_or("").to_string();
+    let url = body.get("url").and_then(Value::as_str).unwrap_or("").to_string();
+    let platform = body.get("platform").and_then(Value::as_str).unwrap_or("").to_string();
+    let key = normalize_source_key(artist, title);
+    if key == "|" {
+        // Refuse to persist an entry with no artist and no title.
+        return json_err(StatusCode::BAD_REQUEST, "artist and title must not both be empty");
+    }
+    let path = util::data_dir().join("track-sources.json");
+    // Missing file starts fresh; a corrupt one is discarded rather than fatal.
+    let mut map = match fs::read_to_string(&path) {
+        Ok(raw) => serde_json::from_str::<Value>(&raw)
+            .ok()
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default(),
+        Err(_) => serde_json::Map::new(),
+    };
+    let saved_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    map.insert(
+        key,
+        json!({ "resolvedId": resolved_id, "url": url, "platform": platform, "savedAt": saved_at }),
+    );
+    // Cap at 5000 entries; drop the oldest by savedAt first.
+    if map.len() > 5000 {
+        let mut by_saved_at: Vec<(String, u64)> = map
+            .iter()
+            .map(|(k, v)| (k.clone(), v.get("savedAt").and_then(Value::as_u64).unwrap_or(0)))
+            .collect();
+        by_saved_at.sort_by_key(|(_, at)| *at);
+        let excess = map.len() - 5000;
+        for (k, _) in by_saved_at.into_iter().take(excess) {
+            map.remove(&k);
+        }
+    }
+    if let Some(parent) = path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            util::log_line("ERROR", &format!("save_track_source: create dir failed: {e}"));
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, "failed to save track source");
+        }
+    }
+    let serialized = match serde_json::to_string_pretty(&Value::Object(map)) {
+        Ok(s) => s,
+        Err(e) => {
+            util::log_line("ERROR", &format!("save_track_source: serialize failed: {e}"));
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, "failed to save track source");
+        }
+    };
+    if let Err(e) = fs::write(&path, serialized) {
+        util::log_line("ERROR", &format!("save_track_source: write {} failed: {e}", path.display()));
+        return json_err(StatusCode::INTERNAL_SERVER_ERROR, "failed to save track source");
+    }
+    json_ok(json!({ "success": true, "path": path.to_string_lossy().to_string() }))
 }
 
-async fn api_state(State(_state): State<Shared>, Json(_body): Json<Value>) -> Response {
+async fn api_state(State(_state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let slot = LAST_STATE.get_or_init(|| StdMutex::new(Value::Null));
+    match slot.lock() {
+        Ok(mut guard) => *guard = body,
+        Err(poisoned) => *poisoned.into_inner() = body,
+    }
     json_ok(json!({ "success": true }))
 }
 
@@ -3154,7 +3329,7 @@ pub fn build_router(state: Shared) -> Router {
         .route("/api/track-analysis", get(stub_unported))
         .route("/api/artist", get(artist))
         .route("/api/prefetch", get(prefetch_track))
-    .route("/api/cached", get(cached_status))
+        .route("/api/cached", get(cached_status))
         .route("/api/albums/search", get(stub_empty_list))
         .route("/api/playlists/search", get(stub_empty_list))
         .route("/api/albums/tracks", get(stub_empty_list))

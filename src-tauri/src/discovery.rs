@@ -558,7 +558,7 @@ async fn ytm_post(state: &Shared, path: &str, body: Value) -> Result<Value, Stri
     response.json::<Value>().await.map_err(|e| format!("ytm {path}: {e}"))
 }
 
-/// YTM RDAMVM mix for a video id. Falls back to empty vec â€” caller degrades gracefully.
+/// YTM RDAMVM mix for a video id. Falls back to empty vec - caller degrades gracefully.
 async fn ytm_mix_tracks(state: &Shared, seed_vid: &str, limit: usize) -> Vec<Value> {
     let body = ytm_body(
         "WEB_REMIX",
@@ -715,7 +715,6 @@ fn vibe_profile(history: &[Value], favorites: &[Value], client_profile: &Value) 
     json!({
         "topArtists": top_artists,
         "dominantScript": dominant_script,
-        "typicalDuration": Value::Null,
         "trackCount": history.len() + favorites.len(),
         "seedArtists": top_artists.clone(),
     })
@@ -1263,6 +1262,11 @@ pub async fn trending(state: &Shared, query: &HashMap<String, String>) -> Value 
     // network fallbacks. This replaced the old hardcoded scene lists.
     let chart_query = HashMap::from([(String::from("country"), region)]);
     let chart = top_chart(state, &chart_query).await;
+    let tracks_ok = chart.get("success").and_then(Value::as_bool).unwrap_or(false);
+    if !tracks_ok {
+        // Fail closed: the renderer hides the section when tracks is empty.
+        return json!({ "success": false, "tracks": [] });
+    }
     let tracks = chart.get("tracks").cloned().unwrap_or_else(|| Value::Array(vec![]));
     json!({ "success": true, "tracks": tracks })
 }
@@ -1276,7 +1280,10 @@ pub async fn top_chart(state: &Shared, query: &HashMap<String, String>) -> Value
 
     let cache_key = format!("disc:chart:{country}");
     if let Some(cached) = cache_get(&state.stream_cache, &cache_key, Duration::from_secs(30 * 60)) {
-        return json!({ "success": true, "country": country, "tracks": cached });
+        // An empty cached chart means a previous failure; do not serve it.
+        if cached.as_array().map(|items| !items.is_empty()).unwrap_or(false) {
+            return json!({ "success": true, "country": country, "tracks": cached });
+        }
     }
 
     let mut tracks: Vec<Value> = ytm_chart_tracks(state, &country, 50).await;
@@ -1389,13 +1396,20 @@ pub async fn top_chart(state: &Shared, query: &HashMap<String, String>) -> Value
         }
         out.push(track);
     }
+    if out.is_empty() {
+        // Everything failed; fail closed instead of caching an empty chart.
+        return json!({ "success": false, "country": country, "tracks": [] });
+    }
     cache_put(&state.stream_cache, cache_key, json!(out), 32, Duration::from_secs(30 * 60));
     json!({ "success": true, "country": country, "tracks": out })
 }
 
 pub async fn hot(state: &Shared, _query: &HashMap<String, String>) -> Value {
     if let Some(cached) = cache_get(&state.stream_cache, "disc:hot:global", Duration::from_secs(60 * 60)) {
-        return json!({ "success": true, "title": "Hot picks 2026", "tracks": cached });
+        // An empty cached pick means a previous failure; do not serve it.
+        if cached.as_array().map(|items| !items.is_empty()).unwrap_or(false) {
+            return json!({ "success": true, "title": "Hot picks 2026", "tracks": cached });
+        }
     }
     let url = "https://api.deezer.com/chart/0/tracks?limit=40";
     let track_list = match state.http().get(url).send().await {
@@ -1464,6 +1478,10 @@ pub async fn hot(state: &Shared, _query: &HashMap<String, String>) -> Value {
         }
     })).await;
     let out: Vec<Value> = resolved_tracks.into_iter().collect();
+    if out.is_empty() {
+        // Deezer chart unavailable/empty and nothing else succeeded.
+        return json!({ "success": false, "title": "Hot picks 2026", "tracks": [] });
+    }
     cache_put(&state.stream_cache, "disc:hot:global".to_string(), json!(out), 4, Duration::from_secs(60 * 60));
     json!({ "success": true, "title": "Hot picks 2026", "tracks": out })
 }
@@ -1526,7 +1544,6 @@ pub async fn artist(state: &Shared, query: &HashMap<String, String>) -> Value {
                         .or_else(|| item.get("cover_medium"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
-                    let rank = item.get("rank").and_then(|v| v.as_u64()).unwrap_or(0);
                     let explicit = item.get("explicit_lyrics").and_then(|v| v.as_bool()).unwrap_or(false);
                     tracks.push(json_track(
                         format!("dz-{}", item.get("id").and_then(|v| v.as_u64()).unwrap_or(0)),
@@ -1538,7 +1555,6 @@ pub async fn artist(state: &Shared, query: &HashMap<String, String>) -> Value {
                         "deezer",
                         Some(explicit),
                     ));
-                    let _ = rank;
                 }
             }
         }
@@ -1593,8 +1609,9 @@ pub async fn artist(state: &Shared, query: &HashMap<String, String>) -> Value {
     // Bio + monthly listeners from Last.fm (public API).
     let mut monthly_listeners = String::new();
     let lfm_url = format!(
-        "https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist={}&api_key=4cb074e4b8ec4ee9ad3eb37d6f7eb240&format=json",
-        util::percent_encode(&name)
+        "https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist={}&api_key={}&format=json",
+        util::percent_encode(&name),
+        LASTFM_KEY
     );
     if let Ok(resp) = state.http().get(&lfm_url).send().await {
         if let Ok(json) = resp.json::<Value>().await {

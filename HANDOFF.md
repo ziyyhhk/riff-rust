@@ -2,6 +2,21 @@
 
 Read this first. Then `PORTING.md` for the feature-by-feature porting status.
 
+**2026-11-18 — v0.1.19 shipped.** Fixes: custom data dir was silently inert (now a fixed-location
+bootstrap pointer `%LOCALAPPDATA%\Riff Rust Boot\data-dir.json`, read memoized at boot; `set_data_dir`
+writes it after the file copy and takes effect next launch); `/api/state`, `/api/save-track-source`,
+`/api/save-default-settings` now do real work (karaoke state store, `track-sources.json`,
+`defaults-saved.json`); `unwrap()`s removed from proxy/thumbnail handlers; charts fail closed
+(`success:false`) on total failure; plugin execution is ALIVE renderer-side (`list_plugins` ships
+source ≤256 KB + JSDoc metadata; `new Function('Riff','plugin', code)` like upstream); offline_library
+reads ID3 tags for cached MP3s; Last.fm key unified. RAM: removed the Android/ChromeOS-only
+`--enable-low-end-device-mode` placebo, added `--disable-background-networking/--disable-component-update/
+--disable-domain-reliability/--no-pings`; `SetMemoryUsageTargetLevel` stays `LOW` permanently (measured:
+NORMAL-when-visible filled the webview tree to ~590 MB with zero frame-pacing benefit).
+**Do not claim 40 MB** — the WebView2 floor rules that out.
+`assets/Tone.js` was deleted (zero references). Renderer: `w128` thumbs in rows, `content-visibility: auto`,
+`decoding="async"`.
+
 ## What this is
 
 A from-scratch rebuild of [Riff](https://github.com/rootscripts/riff) (Electron + vanilla JS, MIT, by rootscripts) in **Rust + Tauri v2**. Windows-first, NSIS installer, no bundled Chromium, no Node.
@@ -164,6 +179,20 @@ Release process used for v0.1.x: bump `version` in `package.json`, `src-tauri/Ca
     misalign), with MyMemory per-line fallback when Google throttles the
     network (429). Language selection used to silently revert to English
     on every miss.
+27. The bootstrap pointer (`util::bootstrap_pointer_path()`) is the ONLY authority for a custom
+     data dir. `config.json["dataDir"]` is written for upstream compatibility but is never read.
+     `data_dir()` memoizes with a process-lifetime OnceLock and must never call `log_line` inside
+     its initializer (re-entrancy deadlock) — the WARN is staged and emitted after init instead.
+28. WebView2 memory target is ALWAYS LOW (`set_webview_memory_level` in main.rs). Measured on this
+     machine: NORMAL while visible filled the webview tree to ~590 MB; always-LOW holds ~99-115 MB
+     and 60 fps. LOW keeps audio/scripts running; it only trims caches. Do not "fix" it to NORMAL.
+29. `track-sources.json` caps at 5000 entries; `defaults-saved.json` (512 KB / 2000 keys) and the
+     track-sources merge are tolerant of a corrupt file and never throw.
+30. `trim_working_sets()` (main.rs, inline FFI, deliberately NOT windows-sys features — enabling
+     them rebuilds the whole dependency graph) empties the working set of this process tree via
+     `K32EmptyWorkingSet` on minimize/close-to-tray. Never call it while visible: the page-in
+     storm janks the UI. It shows the "small" number in Task Manager only when hidden; committed
+     memory (private bytes) does not change.
 
 ## Done (see PORTING.md)
 

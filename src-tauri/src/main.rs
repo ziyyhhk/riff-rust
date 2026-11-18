@@ -192,6 +192,139 @@ fn persist_window_state(window: &tauri::WebviewWindow, force: bool) {
     );
 }
 
+/// WebView2 memory usage target per Microsoft's `MemoryUsageTargetLevel`.
+/// Always LOW in this app: measured on this machine (2026-11-18), NORMAL while
+/// the window was visible filled the webview working sets to ~590 MB tree with
+/// no frame-pacing benefit; 0.1.17/0.1.18 shipped always-LOW at ~99-115 MB tree
+/// and held 60 fps. LOW keeps caches trimmed while scripts keep running, so
+/// background audio and the WebAudio graph are unaffected.
+#[cfg(windows)]
+fn set_webview_memory_level(window: &tauri::WebviewWindow) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW, ICoreWebView2_19,
+    };
+    use windows::core::Interface;
+    let level = COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW;
+    let result = window.with_webview(move |webview| unsafe {
+        let controller = webview.controller();
+        if let Ok(core) = controller.CoreWebView2() {
+            if let Ok(core19) = core.cast::<ICoreWebView2_19>() {
+                let _ = core19.SetMemoryUsageTargetLevel(level);
+            }
+        }
+    });
+    if let Err(err) = result {
+        util::log_line("WARN", &format!("webview memory target failed: {err}"));
+    }
+}
+
+#[cfg(not(windows))]
+fn set_webview_memory_level(_window: &tauri::WebviewWindow) {}
+
+/// Inline FFI for the one-off working-set trim, kept out of `windows-sys`
+/// features so enabling them cannot rebuild the whole dependency graph.
+/// Signatures verified against the vendored windows-sys 0.61 bindings.
+#[cfg(windows)]
+mod win_workingset {
+    use std::ffi::c_void;
+
+    pub type Handle = *mut c_void;
+
+    #[repr(C)]
+    pub struct ProcessEntry32W {
+        pub dw_size: u32,
+        pub cnt_usage: u32,
+        pub process_id: u32,
+        pub default_heap_id: usize,
+        pub module_id: u32,
+        pub cnt_threads: u32,
+        pub parent_process_id: u32,
+        pub priority_class_base: i32,
+        pub flags: u32,
+        pub exe_file: [u16; 260],
+    }
+
+    pub const TH32CS_SNAPPROCESS: u32 = 2;
+    pub const PROCESS_SET_QUOTA: u32 = 256;
+    pub const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 4096;
+    pub const INVALID_HANDLE_VALUE: Handle = -1isize as Handle;
+
+    extern "system" {
+        pub fn CreateToolhelp32Snapshot(flags: u32, process_id: u32) -> Handle;
+        pub fn Process32FirstW(snapshot: Handle, entry: *mut ProcessEntry32W) -> i32;
+        pub fn Process32NextW(snapshot: Handle, entry: *mut ProcessEntry32W) -> i32;
+        pub fn OpenProcess(access: u32, inherit: i32, process_id: u32) -> Handle;
+        pub fn K32EmptyWorkingSet(process: Handle) -> i32;
+        pub fn CloseHandle(object: Handle) -> i32;
+    }
+}
+
+/// Empty the working set of this process and every child process. Never
+/// called while the window is visible — see the call sites.
+#[cfg(windows)]
+fn trim_working_sets() {
+    use std::collections::HashSet;
+
+    unsafe {
+        use win_workingset::*;
+
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return;
+        }
+        let mut pairs: Vec<(u32, u32)> = Vec::new();
+        let mut entry = ProcessEntry32W {
+            dw_size: std::mem::size_of::<ProcessEntry32W>() as u32,
+            cnt_usage: 0,
+            process_id: 0,
+            default_heap_id: 0,
+            module_id: 0,
+            cnt_threads: 0,
+            parent_process_id: 0,
+            priority_class_base: 0,
+            flags: 0,
+            exe_file: [0; 260],
+        };
+        if Process32FirstW(snapshot, &mut entry) != 0 {
+            loop {
+                pairs.push((entry.parent_process_id, entry.process_id));
+                if Process32NextW(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snapshot);
+
+        // BFS from our own pid so toolhelp enumeration order cannot drop grandchildren.
+        let mut pids: HashSet<u32> = HashSet::from([std::process::id()]);
+        loop {
+            let before = pids.len();
+            for &(parent, child) in &pairs {
+                if pids.contains(&parent) {
+                    pids.insert(child);
+                }
+            }
+            if pids.len() == before {
+                break;
+            }
+        }
+        for pid in pids {
+            let handle = OpenProcess(
+                PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION,
+                0,
+                pid,
+            );
+            if !handle.is_null() {
+                K32EmptyWorkingSet(handle);
+                CloseHandle(handle);
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn trim_working_sets() {}
+
 fn main() {
     util::ensure_dirs();
     let cache_freed = util::prune_cache_limit();
@@ -337,7 +470,7 @@ fn main() {
                 // (20 fps), while letting the GPU rasterize large panels then
                 // blocked the main thread for hundreds of ms on first paint.
                 // This keeps frames cheap without the GPU tile memory.
-                .additional_browser_args("--renderer-process-limit=1 --enable-low-end-device-mode --disable-gpu-rasterization --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --js-flags=--expose-gc")
+                .additional_browser_args("--renderer-process-limit=1 --disable-gpu-rasterization --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-networking --disable-component-update --disable-domain-reliability --no-pings --js-flags=--expose-gc")
                 .title("Riff Rust")
                 .inner_size(win_w, win_h)
                 .position(win_x, win_y)
@@ -355,27 +488,12 @@ fn main() {
                 })
                 .build()?;
 
-            // WebView2 has an explicit low memory target. Riff is a static UI
-            // plus one audio stream, so it does not need the desktop-sized cache
-            // budget that Chromium reserves by default.
-            #[cfg(windows)]
-            {
-                use webview2_com::Microsoft::Web::WebView2::Win32::{
-                    ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW,
-                };
-                use windows::core::Interface;
-                let result = window.with_webview(|webview| unsafe {
-                    let controller = webview.controller();
-                    if let Ok(core) = controller.CoreWebView2() {
-                        if let Ok(core19) = core.cast::<ICoreWebView2_19>() {
-                            let _ = core19.SetMemoryUsageTargetLevel(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW);
-                        }
-                    }
-                });
-                if let Err(err) = result {
-                    util::log_line("WARN", &format!("webview memory target failed: {err}"));
-                }
-            }
+            // WebView2 has an explicit memory usage target. Always LOW here:
+            // measured on this machine, NORMAL while visible fills the webview
+            // working sets to ~590 MB tree and wins nothing in frame pacing,
+            // while 0.1.17/0.1.18 shipped always-LOW at ~99-115 MB. LOW keeps
+            // caches trimmed; scripts keep running so audio is unaffected.
+            set_webview_memory_level(&window);
 
             // If the page never finishes loading, do not leave an invisible app running.
             let fallback = window.clone();
@@ -402,6 +520,7 @@ fn main() {
                                 if let Some(window) = app.get_webview_window("main") {
                                     let _ = window.show();
                                     let _ = window.set_focus();
+                                    set_webview_memory_level(&window);
                                     let state = app.state::<Shared>();
                                     if state.set_window_visible(true) {
                                         let _ = window.emit("window-visibility", true);
@@ -433,7 +552,14 @@ fn main() {
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::Resized(_) => {
                 let state = window.state::<Shared>();
-                let visible = !window.is_minimized().unwrap_or(false);
+                let minimized = window.is_minimized().unwrap_or(false);
+                if let Some(webview) = window.app_handle().get_webview_window("main") {
+                    set_webview_memory_level(&webview);
+                }
+                if minimized {
+                    trim_working_sets();
+                }
+                let visible = !minimized;
                 if state.set_window_visible(visible) {
                     let _ = window.emit("window-visibility", visible);
                 }
@@ -456,6 +582,10 @@ fn main() {
                 if tray_on_close && !quitting {
                     api.prevent_close();
                     let _ = window.hide();
+                    if let Some(webview) = window.app_handle().get_webview_window("main") {
+                        set_webview_memory_level(&webview);
+                    }
+                    trim_working_sets();
                     if state.set_window_visible(false) {
                         let _ = window.emit("window-visibility", false);
                     }

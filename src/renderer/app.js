@@ -10408,8 +10408,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       fillMain.style.setProperty('--k', k.toFixed(4));
     }
   }
-  function startGradientLoop() {}
-
   const CASCADE_CONFIG = {
     anchorY: 35,
     delayStep: 35,
@@ -17692,7 +17690,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       ${!isAlbum ? `
       <div class="track-row-thumb-wrap">
         <svg class="track-row-fallback-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
-        ${rowThumb ? `<img loading="lazy"  class="track-row-thumb" src="${escapeHtml(rowThumb)}" alt="" decoding="async" onerror="this.style.display='none'">` : ''}
+        ${rowThumb ? `<img loading="lazy"  class="track-row-thumb" src="${escapeHtml(smallThumb(rowThumb))}" alt="" decoding="async" onerror="this.style.display='none'">` : ''}
       </div>` : ''}
       <div class="track-row-info">
       <div class="track-row-title-row">
@@ -20302,6 +20300,14 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
     return url;
   }
 
+  // Small list/sidebar rows only: ask the CDN for a screen-sized copy instead
+  // of the 500px+ original. No-op when the URL carries no size suffix, and
+  // never upscales a smaller request.
+  function smallThumb(url) {
+    if (!url || typeof url !== 'string') return url;
+    return url.replace(/=w(\d+)-h(\d+)/i, (m, w, h) => (Number(w) > 128 && Number(h) > 128) ? '=w128-h128' : m);
+  }
+
   function getTrackThumbUrl(track, size) {
     if (!track) return '';
     const pick = (u) => (size === 'large' ? u : compactThumbUrl(u));
@@ -20339,9 +20345,10 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
         container.classList.add('cover-single');
         const img = document.createElement('img');
         img.className = 'cover-single-img';
-        img.src = firstThumb;
+        img.src = size <= 64 ? smallThumb(firstThumb) : firstThumb;
         img.alt = '';
         img.loading = 'lazy';
+        img.decoding = 'async';
         img.style.objectFit = 'cover';
         img.onerror = () => {
           container.classList.remove('cover-single');
@@ -20365,9 +20372,11 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
       container.classList.add('cover-single');
       const img = document.createElement('img');
       img.className = 'cover-single-img';
-      img.src = playlist.cover.trim();
+      const pc = playlist.cover.trim();
+      img.src = size <= 64 ? smallThumb(pc) : pc;
       img.alt = '';
       img.loading = 'lazy';
+      img.decoding = 'async';
       img.style.objectFit = 'cover';
       img.onerror = () => {
         renderFallback();
@@ -31647,8 +31656,8 @@ function bindCoverHoldZoom(wrapEl) {
   (function initUpdateUI() {
     const api = window.electronAPI;
     const $ = (id) => document.getElementById(id);
-    let currentAppVersion = '0.1.18';
-    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.18' : v;
+    let currentAppVersion = '0.1.19';
+    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.19' : v;
     if (api && api.getAppVersion) {
       api.getAppVersion().then((v) => {
         if (v) {
@@ -31731,7 +31740,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.1.18';
+      if (verEl) verEl.textContent = displayVer || 'v0.1.19';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -35101,7 +35110,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.1.18';
+    let appVer = '0.1.19';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();
@@ -41687,8 +41696,9 @@ function bindCoverHoldZoom(wrapEl) {
         const img = document.createElement('img');
         img.alt = '';
         img.loading = 'lazy';
+        img.decoding = 'async';
         img.addEventListener('error', () => { img.remove(); });
-        img.src = thumb;
+        img.src = smallThumb(thumb);
         art.appendChild(img);
       }
       const info = document.createElement('div');
@@ -42203,7 +42213,7 @@ function bindCoverHoldZoom(wrapEl) {
       const thumb = typeof getTrackThumbUrl === 'function' ? getTrackThumbUrl(tr) : (tr.thumbnail || tr.cover || '');
       row.innerHTML = `
         <div class="sb-lib-cover">
-          ${thumb ? `<img src="${escapeHtml(thumb)}" alt="" loading="lazy" onerror="this.style.display='none'">` : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>'}
+          ${thumb ? `<img src="${escapeHtml(smallThumb(thumb))}" alt="" loading="lazy" decoding="async" onerror="this.style.display='none'">` : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>'}
         </div>
         <div class="sb-lib-info">
           <span class="sb-lib-title">${escapeHtml(tr.title || 'Untitled')}</span>
@@ -42406,7 +42416,7 @@ function bindCoverHoldZoom(wrapEl) {
           row.title = `${alb.title || 'Album'}${alb.artist ? ' • ' + alb.artist : ''}`;
           row.innerHTML = `
             <div class="sb-lib-cover">
-              ${alb.cover ? `<img src="${escapeHtml(alb.cover)}" alt="" loading="lazy" onerror="this.style.display='none'">` : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>'}
+              ${alb.cover ? `<img src="${escapeHtml(smallThumb(alb.cover))}" alt="" loading="lazy" decoding="async" onerror="this.style.display='none'">` : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>'}
             </div>
             <div class="sb-lib-info">
               <span class="sb-lib-title">${escapeHtml(alb.title || 'Album')}</span>

@@ -493,23 +493,53 @@ pub fn clear_cache() -> serde_json::Value {
 #[tauri::command]
 pub fn get_data_dir() -> serde_json::Value {
     let dir = util::data_dir();
+    let default_dir = util::default_data_dir();
+    let pointer_dir = util::read_data_dir_pointer();
+    // isCustom is true only when the fixed-location bootstrap pointer exists and
+    // names the data dir this process is actually using. Right after
+    // set_data_dir() in the same run this reports false by design: the memoized
+    // data_dir() does not move until the next launch (the renderer toasts
+    // requiresRestart and relaunches, at which point the pointer is authoritative).
+    let is_custom = pointer_dir
+        .as_deref()
+        .map(|p| PathBuf::from(p) == dir)
+        .unwrap_or(false);
     serde_json::json!({
         "dir": dir.to_string_lossy(),
-        "defaultDir": dir.to_string_lossy(),
-        "isCustom": false,
+        "defaultDir": default_dir.to_string_lossy(),
+        "isCustom": is_custom,
         "platform": std::env::consts::OS,
+        "pointer": {
+            "path": util::bootstrap_pointer_path().to_string_lossy(),
+            "dir": pointer_dir,
+        },
     })
 }
 
 #[tauri::command]
 pub fn set_data_dir(dir: String, move_files: bool) -> serde_json::Value {
+    let target = dir.trim();
+    // Empty/invalid target: same failure contract: success:false, and the
+    // bootstrap pointer is left untouched. Never deletes user data.
+    if target.is_empty() {
+        return serde_json::json!({ "dir": dir, "success": false, "error": "data dir path is empty" });
+    }
     let from = util::data_dir();
-    let to = PathBuf::from(&dir);
-    let _ = fs::create_dir_all(&to);
-    if move_files {
-        const ENTRIES: [&str; 12] = [
+    let to = PathBuf::from(target);
+    if let Err(e) = fs::create_dir_all(&to) {
+        return serde_json::json!({ "dir": target, "success": false, "error": format!("cannot create data dir {target}: {e}") });
+    }
+    // Spelling-tolerant self-copy guard: copying a file onto itself can truncate
+    // it, so never copy when source and target resolve to the same place.
+    let same_dir = match (fs::canonicalize(&from), fs::canonicalize(&to)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => to == from,
+    };
+    if move_files && !same_dir {
+        const ENTRIES: [&str; 13] = [
             "tracks", "library", "metadata.json", "library.json", "startup.json",
             "custom-lyrics", "lyrics", "thumbnails", "local-covers", "bin", "themes", "plugins",
+            "config.json",
         ];
         for name in ENTRIES {
             let src = from.join(name);
@@ -523,11 +553,23 @@ pub fn set_data_dir(dir: String, move_files: bool) -> serde_json::Value {
             }
         }
     }
-    // Persist the override for the next launch (mirrors Riff's config.json dataDir)
+    // Persist the override for upstream-style compatibility (mirrors Riff's
+    // config.json dataDir). Note this file lives INSIDE the data dir and is no
+    // longer what data_dir() reads: the fixed-location bootstrap pointer is.
     let mut config = util::read_json_file(&util::config_path());
-    config["dataDir"] = serde_json::json!(dir);
+    config["dataDir"] = serde_json::json!(target);
     let _ = util::write_json_file(&util::config_path(), &config);
-    serde_json::json!({ "dir": dir, "success": true })
+    // Write the bootstrap pointer, only after the copy above succeeded. This is
+    // what the next launch's data_dir() actually reads.
+    let pointer = util::bootstrap_pointer_path();
+    if !util::write_json_file(&pointer, &serde_json::json!({ "dataDir": target })) {
+        return serde_json::json!({
+            "dir": target,
+            "success": false,
+            "error": format!("files copied, but the bootstrap pointer could not be written to {}", pointer.to_string_lossy()),
+        });
+    }
+    serde_json::json!({ "dir": target, "success": true, "requiresRestart": true })
 }
 
 fn copy_dir_recursive(from: &PathBuf, to: &PathBuf) -> std::io::Result<()> {
@@ -1089,8 +1131,97 @@ pub fn remove_theme(id: String) {
 }
 
 // ----------------------------------------------------------------- plugins
-// Plugins can be listed/managed but not executed yet — plugin execution needs
-// a sandboxed JS runtime, which lands in a later milestone (see PORTING.md).
+// Plugins execute renderer-side: the renderer builds each plugin with
+// `new Function('Riff', 'plugin', code + '//# sourceURL=riff-plugin-' + file)`,
+// exactly as upstream Riff did. There is no Rust-side JS runtime and none is
+// needed; this command ships the source plus JSDoc-ish header metadata so the
+// renderer's runPlugin() and the plugin cards have what they need.
+
+/// Plugins larger than this are listed, but their source is not shipped.
+const PLUGIN_MAX_BYTES: u64 = 256 * 1024;
+
+/// Parse the JSDoc-ish header comment of a plugin (the first `/* ... */` block).
+/// Returns (name, author, version, description); any of them may be absent.
+/// `@description` runs until the next `@tag` or a blank line.
+fn parse_plugin_header(
+    code: &str,
+) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
+    let start = match code.find("/*") {
+        Some(i) => i + 2,
+        None => return (None, None, None, None),
+    };
+    let end = match code[start..].find("*/") {
+        Some(i) => start + i,
+        None => return (None, None, None, None),
+    };
+    let header = &code[start..end];
+
+    let mut name = None;
+    let mut author = None;
+    let mut version = None;
+    let mut description: Option<String> = None;
+    let mut desc_lines: Vec<String> = Vec::new();
+    let mut in_description = false;
+
+    fn flush_description(lines: &mut Vec<String>) -> Option<String> {
+        let joined = lines.join(" ");
+        lines.clear();
+        let joined = joined.trim();
+        if joined.is_empty() {
+            None
+        } else {
+            Some(joined.to_string())
+        }
+    }
+
+    for raw in header.lines() {
+        let mut line = raw.trim();
+        // Strip the leading comment-continuation marker ("* foo" or bare "*").
+        if let Some(rest) = line.strip_prefix('*') {
+            line = rest.trim();
+        }
+        if let Some(tag_line) = line.strip_prefix('@') {
+            if let Some(finished) = flush_description(&mut desc_lines) {
+                description = Some(finished);
+            }
+            in_description = false;
+            let tag_line = tag_line.trim();
+            let (tag, rest) = match tag_line.find(char::is_whitespace) {
+                Some(i) => (&tag_line[..i], tag_line[i..].trim()),
+                None => (tag_line, ""),
+            };
+            let value = |s: &str| {
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
+            };
+            match tag {
+                "name" => name = value(rest),
+                "author" => author = value(rest),
+                "version" => version = value(rest),
+                "description" => {
+                    in_description = true;
+                    if !rest.is_empty() {
+                        desc_lines.push(rest.to_string());
+                    }
+                }
+                _ => {}
+            }
+        } else if in_description {
+            if line.is_empty() {
+                in_description = false;
+            } else {
+                desc_lines.push(line.to_string());
+            }
+        }
+    }
+    if let Some(finished) = flush_description(&mut desc_lines) {
+        description = Some(finished);
+    }
+    (name, author, version, description)
+}
 
 #[tauri::command]
 pub fn list_plugins() -> Vec<serde_json::Value> {
@@ -1101,17 +1232,54 @@ pub fn list_plugins() -> Vec<serde_json::Value> {
     if let Ok(entries) = fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map(|e| e.eq_ignore_ascii_case("js")).unwrap_or(false) {
-                let file = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-                let enabled = state.get(&file).and_then(|v| v.as_bool()).unwrap_or(false);
-                let name = file.trim_end_matches(".js").to_string();
-                out.push(serde_json::json!({
-                    "file": file,
-                    "name": name,
-                    "enabled": enabled,
-                    "path": path.to_string_lossy(),
-                }));
+            let file = match path.file_name().map(|s| s.to_string_lossy().to_string()) {
+                Some(f) => f,
+                None => continue,
+            };
+            // Skip dotfiles (.DS_Store, .gitkeep, ...) and anything unreadable as a file.
+            if file.starts_with('.') || !path.is_file() {
+                continue;
             }
+            if !path.extension().map(|e| e.eq_ignore_ascii_case("js")).unwrap_or(false) {
+                continue;
+            }
+            let enabled = state.get(&file).and_then(|v| v.as_bool()).unwrap_or(false);
+            let fallback_name = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| file.trim_end_matches(".js").to_string());
+            let mut plugin = serde_json::json!({
+                "file": file,
+                "name": fallback_name,
+                "enabled": enabled,
+                "path": path.to_string_lossy(),
+            });
+            let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            if size > PLUGIN_MAX_BYTES {
+                // Listed but source not shipped; the renderer shows the note.
+                plugin["note"] = serde_json::json!(format!(
+                    "plugin source is {size} bytes; code not shipped (limit is {PLUGIN_MAX_BYTES} bytes)"
+                ));
+            } else {
+                match fs::read_to_string(&path) {
+                    Ok(code) => {
+                        let (name, author, version, description) = parse_plugin_header(&code);
+                        if let Some(name) = name {
+                            plugin["name"] = serde_json::json!(name);
+                        }
+                        plugin["code"] = serde_json::json!(code);
+                        plugin["author"] = author.map(|v| serde_json::json!(v)).unwrap_or(serde_json::Value::Null);
+                        plugin["version"] = version.map(|v| serde_json::json!(v)).unwrap_or(serde_json::Value::Null);
+                        plugin["description"] =
+                            description.map(|v| serde_json::json!(v)).unwrap_or(serde_json::Value::Null);
+                    }
+                    Err(e) => {
+                        plugin["note"] =
+                            serde_json::json!(format!("plugin source could not be read: {e}"));
+                    }
+                }
+            }
+            out.push(plugin);
         }
     }
     out
