@@ -13,14 +13,14 @@
 //! - Caches: vibe 20 min, chart/country/trending 30 min, hot 1 h.
 //! - Synthetic `listeners` are deterministic (hash-based), not real counts.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use serde_json::{json, Value};
 
 use crate::server::Shared;
 use crate::state::{cache_get, cache_put};
-use crate::{util, ytm};
+use crate::{taste, util, ytm};
 
 const YTM_API_BASE: &str = "https://music.youtube.com/youtubei/v1";
 const LASTFM_KEY: &str = "4b4f73bda181868353f9b438604adf52";
@@ -169,38 +169,211 @@ fn normalized_key(title: &str, artist: &str) -> String {
 }
 
 /// Strip the decorators that make a remix of the same song look like its own
-/// track: parentheticals, bracketed version tags, and slowed/tekk/nightcore
-/// style suffixes. Lets the queue keep at most one cut of the same song.
-fn base_title(title: &str) -> String {
-    let mut stripped = String::with_capacity(title.len());
-    let mut depth = 0i32;
-    for ch in title.chars() {
-        match ch {
-            '(' | '[' | '{' => depth += 1,
-            ')' | ']' | '}' => depth -= 1,
-            _ => {
-                if depth <= 0 {
-                    stripped.push(ch);
+/// track. `taste::core_title` is the single implementation used by the queue,
+/// the taste profile and the vibe filter, so client side and server side agree.
+fn family_key(title: &str, artist: &str) -> String {
+    normalized_key(&taste::core_title(title), &normalize_artist(artist))
+}
+
+fn core_key(title: &str, artist: &str) -> String {
+    family_key(title, artist)
+}
+
+/// Older clients send `artist::title` keys built by the renderer. Normalize
+/// both sides through the same core-title function so "song (slowed)" and
+/// "song" collide even when the client key kept the decorator.
+fn avoid_core_key(key: &str) -> String {
+    let (artist, title) = key.split_once("::").unwrap_or(("", key));
+    core_key(title, artist)
+}
+
+fn is_genre_tag(tag: &str) -> bool {
+    !matches!(
+        tag,
+        "sad"
+            | "emotional"
+            | "heartbreak"
+            | "lonely"
+            | "happy"
+            | "chill"
+            | "dark"
+            | "aggressive"
+            | "hype"
+            | "dreamy"
+            | "nostalgic"
+            | "romantic"
+            | "peaceful"
+            | "atmospheric"
+    )
+}
+
+fn push_tag(map: &mut HashMap<String, f64>, raw: &str, weight: f64) {
+    if let Some(tag) = taste::canonical_tag(raw) {
+        *map.entry(tag).or_insert(0.0) += weight;
+    }
+}
+
+fn absorb_tag_list(value: Option<&Value>, map: &mut HashMap<String, f64>, base: f64) {
+    let Some(items) = value.and_then(|v| v.as_array()) else {
+        return;
+    };
+    for item in items {
+        if let Some(name) = item.as_str() {
+            push_tag(map, name, base);
+        } else if let Some(obj) = item.as_object() {
+            let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let weight = obj.get("weight").and_then(|v| v.as_f64()).unwrap_or(base);
+            push_tag(map, name, weight.max(base * 0.25));
+        }
+    }
+}
+
+fn absorb_track_tags(tags: &[String], genres: &mut HashMap<String, f64>, moods: &mut HashMap<String, f64>, base: f64) {
+    for tag in tags {
+        let map = if is_genre_tag(tag) { &mut *genres } else { &mut *moods };
+        *map.entry(tag.clone()).or_insert(0.0) += base;
+    }
+}
+
+fn artist_is_avoided(avoid_artists: &[String], artist: &str) -> bool {
+    let candidate = normalize_artist(artist);
+    if candidate.is_empty() {
+        return false;
+    }
+    avoid_artists.iter().any(|blocked| {
+        let blocked = normalize_artist(blocked);
+        if blocked.is_empty() {
+            return false;
+        }
+        candidate == blocked
+            || candidate.starts_with(&format!("{blocked} "))
+            || candidate.contains(&format!(" {blocked} "))
+            || blocked.starts_with(&format!("{candidate} "))
+    })
+}
+
+struct AvoidSet {
+    ids: HashSet<String>,
+    keys: HashSet<String>,
+    cores: HashSet<String>,
+    titles: HashSet<String>,
+    artists: Vec<String>,
+}
+
+impl AvoidSet {
+    fn from_body(body: &Value) -> Self {
+        let avoid = body.get("avoid").cloned().unwrap_or(Value::Null);
+        let mut ids: HashSet<String> = avoid
+            .get("ids")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(|s| s.trim().to_string()))
+            .filter(|s| !s.is_empty())
+            .collect();
+        let mut keys: HashSet<String> = avoid
+            .get("keys")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(|s| s.trim().to_string()))
+            .filter(|s| !s.is_empty())
+            .collect();
+        let artists: Vec<String> = avoid
+            .get("artists")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+
+        // A recommendation must never hand back a track the user already
+        // played. The renderer sends the last 30 history rows, but older
+        // clients only send skips, so fold history in server side as well.
+        if let Some(history) = body.get("history").and_then(|v| v.as_array()) {
+            for track in history {
+                if let Some(id) = track.get("id").and_then(|v| v.as_str()) {
+                    if !id.trim().is_empty() {
+                        ids.insert(id.trim().to_string());
+                    }
+                }
+                let artist = track.get("artist").and_then(|v| v.as_str()).unwrap_or("");
+                let title = track.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                if !artist.trim().is_empty() && !title.trim().is_empty() {
+                    keys.insert(format!("{}::{}", normalize_artist(artist), taste::core_title(title)));
                 }
             }
         }
-    }
-    stripped
-        .split_whitespace()
-        .filter(|word| {
-            let w = word.to_lowercase();
-            !matches!(
-                w.as_str(),
-                "slowed" | "reverb" | "tekk" | "techno" | "nightcore" | "vip" | "remix" | "edit"
-                    | "ultra" | "bass" | "boosted" | "extended" | "radio" | "sped" | "speed"
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
 
-fn family_key(title: &str, artist: &str) -> String {
-    normalized_key(&base_title(title), artist)
+        // The anchor is the song currently playing; its remix/tekk uploads
+        // must never be queued as "new" tracks either.
+        if let Some(anchor) = body.get("anchor") {
+            let id = anchor.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let artist = anchor.get("artist").and_then(|v| v.as_str()).unwrap_or("");
+            let title = anchor.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            if !id.trim().is_empty() {
+                ids.insert(id.trim().to_string());
+            }
+            if !artist.trim().is_empty() && !title.trim().is_empty() {
+                keys.insert(format!("{}::{}", normalize_artist(artist), taste::core_title(title)));
+            }
+        }
+
+        let mut cores = HashSet::new();
+        let mut titles = HashSet::new();
+        for key in &keys {
+            let core = avoid_core_key(key);
+            if let Some((_, title)) = core.split_once("::") {
+                if title.len() >= 8 {
+                    titles.insert(title.to_string());
+                }
+            }
+            cores.insert(core);
+        }
+        Self { ids, keys, cores, titles, artists }
+    }
+
+    fn blocks(&self, id: &str, title: &str, artist: &str) -> bool {
+        if !id.is_empty() && self.ids.contains(id) {
+            return true;
+        }
+        let key = normalized_key(title, artist);
+        if self.keys.contains(&key) {
+            return true;
+        }
+        let fam = family_key(title, artist);
+        if self.keys.contains(&fam) || self.cores.contains(&fam) {
+            return true;
+        }
+        if artist_is_avoided(&self.artists, artist) {
+            return true;
+        }
+        let core = core_key(title, artist);
+        if self.cores.contains(&core) {
+            return true;
+        }
+        let cand_core = core.clone();
+        let cand_title = cand_core.split_once("::").map(|(_, t)| t).unwrap_or("");
+        if cand_title.len() >= 8 && self.titles.contains(cand_title) {
+            return true;
+        }
+        // Fuzzy family check for keys built by the old renderer: same artist
+        // and one core title contains the other, but only when the shared
+        // title is long enough to be meaningful.
+        let cand_artist = normalize_artist(artist);
+        if cand_title.len() >= 5 {
+            for avoided in &self.cores {
+                let (a, t) = avoided.split_once("::").unwrap_or(("", ""));
+                if a != cand_artist || t.len() < 5 {
+                    continue;
+                }
+                if cand_title.contains(t) || t.contains(cand_title) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
 }
 
 fn with_listener_fields(track: &mut serde_json::Map<String, Value>, index: usize) {
@@ -549,23 +722,46 @@ fn vibe_profile(history: &[Value], favorites: &[Value], client_profile: &Value) 
 }
 
 fn normalize_artist(name: &str) -> String {
-    name.trim().trim_end_matches(" - Topic").to_string()
+    taste::normalize_artist(name)
 }
 
 pub async fn vibe(state: &Shared, body: &Value) -> Value {
+    let refresh = body.get("refresh").and_then(|v| v.as_bool()).unwrap_or(false);
+    let anchor_key = body
+        .get("anchor")
+        .and_then(|a| {
+            let id = a.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let artist = a.get("artist").and_then(|v| v.as_str()).unwrap_or("");
+            let title = a.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            Some(format!("{id}:{artist}:{title}"))
+        })
+        .unwrap_or_default();
+    let avoid_fingerprint = body
+        .get("avoid")
+        .map(|v| format!("{:x}", simple_hash(&v.to_string())))
+        .unwrap_or_else(|| "none".to_string());
     let cache_key = format!(
-        "disc:vibe:{}",
-        body.get("seeds")
-            .or_else(|| body.get("favorites"))
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "empty".to_string())
+        "disc:vibe:{}:{}:{}",
+        simple_hash(&format!(
+            "{anchor_key}|{}|{}",
+            body.get("mode").and_then(|v| v.as_str()).unwrap_or("foryou"),
+            body.get("seeds")
+                .or_else(|| body.get("favorites"))
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "empty".to_string())
+        )),
+        avoid_fingerprint,
+        body.get("limit").and_then(|v| v.as_u64()).unwrap_or(10)
     );
-    if let Some(blob) = cache_get(&state.stream_cache, &cache_key, Duration::from_secs(20 * 60)) {
-        return json!({
-            "success": true,
-            "profile": blob.get("profile").cloned().unwrap_or(json!({})),
-            "tracks": blob.get("tracks").cloned().unwrap_or(json!([])),
-        });
+    if !refresh {
+        if let Some(blob) = cache_get(&state.stream_cache, &cache_key, Duration::from_secs(20 * 60)) {
+            return json!({
+                "success": true,
+                "profile": blob.get("profile").cloned().unwrap_or(json!({})),
+                "vibe": blob.get("vibe").cloned().unwrap_or(json!({})),
+                "tracks": blob.get("tracks").cloned().unwrap_or(json!([])),
+            });
+        }
     }
 
     let limit = body
@@ -576,6 +772,7 @@ pub async fn vibe(state: &Shared, body: &Value) -> Value {
     let history = body.get("history").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let favorites = body.get("favorites").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let client_profile = body.get("clientProfile").cloned().unwrap_or(Value::Null);
+    let mode = body.get("mode").and_then(|v| v.as_str()).unwrap_or("foryou");
 
     let profile = vibe_profile(&history, &favorites, &client_profile);
     let top_artists: Vec<String> = profile
@@ -584,18 +781,58 @@ pub async fn vibe(state: &Shared, body: &Value) -> Value {
         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
 
-    // Seed selection: explicit seeds (weighted) else favorites+history top artists.
-    // Prefer seeds that carry the exact track id, so the radio is seeded by
-    // the song on the user's queue instead of a first-hit artist search
-    // (this is what actually ties recommendations to the genre being played).
+    // The genre/mood the queue must stay inside. The taste endpoint already
+    // resolved Last.fm tags; for radio the anchor track is the strongest
+    // signal, so its tags are fetched once (cached 24 h) and dominate.
+    let mut vibe_genres: HashMap<String, f64> = HashMap::new();
+    let mut vibe_moods: HashMap<String, f64> = HashMap::new();
+    absorb_tag_list(client_profile.get("genres"), &mut vibe_genres, 2.0);
+    absorb_tag_list(client_profile.get("moods"), &mut vibe_moods, 2.0);
+    if mode != "radio" {
+        absorb_tag_list(client_profile.get("dailyGenres"), &mut vibe_genres, 3.0);
+        absorb_tag_list(client_profile.get("dailyMoods"), &mut vibe_moods, 3.0);
+    }
+
+    let anchor = body.get("anchor").filter(|v| v.is_object()).cloned();
+    if let Some(anchor) = anchor.as_ref() {
+        let artist = anchor.get("artist").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let title = anchor.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
+        if !artist.is_empty() {
+            let mut tags = taste::track_tags(state, artist, title).await;
+            if tags.is_empty() {
+                tags = taste::artist_tags(state, artist).await;
+            }
+            for tag in taste::classify_text(title, artist) {
+                if !tags.contains(&tag) {
+                    tags.push(tag);
+                }
+            }
+            absorb_track_tags(&tags, &mut vibe_genres, &mut vibe_moods, 4.0);
+        }
+    }
+
+    // Seed selection: the anchor track first, then explicit seeds. The client
+    // sends the currently playing song for radio refills, so the queue keeps
+    // the genre of the song the user is listening to instead of drifting into
+    // the all-time favourites mix.
     struct Seed {
         artist: String,
         title: String,
         id: String,
         weight: f64,
-
+        anchor: bool,
     }
     let mut seeds: Vec<Seed> = Vec::new();
+    let mut seen_seed_keys: HashSet<String> = HashSet::new();
+    if let Some(anchor) = anchor.as_ref() {
+        let artist = anchor.get("artist").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        let title = anchor.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        if !artist.is_empty() {
+            let id = anchor.get("id").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            seen_seed_keys.insert(core_key(&title, &artist));
+            seeds.push(Seed { artist, title, id, weight: 10.0, anchor: true });
+        }
+    }
     if let Some(list) = body.get("seeds").and_then(|v| v.as_array()) {
         for seed in list {
             let artist = seed.get("artist").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
@@ -603,6 +840,10 @@ pub async fn vibe(state: &Shared, body: &Value) -> Value {
                 continue;
             }
             let title = seed.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            let key = core_key(&title, &artist);
+            if !seen_seed_keys.insert(key) {
+                continue;
+            }
             let platform = seed
                 .get("platform")
                 .or_else(|| seed.get("source"))
@@ -619,7 +860,7 @@ pub async fn vibe(state: &Shared, body: &Value) -> Value {
             if !usable {
                 id = String::new();
             }
-            seeds.push(Seed { artist, title, id, weight });
+            seeds.push(Seed { artist, title, id, weight, anchor: false });
         }
     }
     if seeds.is_empty() {
@@ -632,16 +873,61 @@ pub async fn vibe(state: &Shared, body: &Value) -> Value {
                 title: String::new(),
                 id: String::new(),
                 weight: 2.0,
+                anchor: false,
             })
             .collect();
     }
-    seeds.truncate(8);
+
+    // If nothing above produced tags (older client payloads), classify the
+    // seed text so a breakcore or sad title still steers the mix.
+    if vibe_genres.is_empty() && vibe_moods.is_empty() {
+        for seed in &seeds {
+            absorb_track_tags(
+                &taste::classify_text(&seed.title, &seed.artist),
+                &mut vibe_genres,
+                &mut vibe_moods,
+                1.0,
+            );
+        }
+    }
+
+    // Cluster the seeds: one anchor plus songs that share the vibe. Mixing a
+    // breakcore anchor with a pop favourite is what made the queue drift into
+    // a different genre. Seeds with an explicit conflicting genre are dropped.
+    for seed in &mut seeds {
+        let tags = taste::classify_text(&seed.title, &seed.artist);
+        let mut overlap = 0.0;
+        let mut has_genre = false;
+        let mut genre_conflict = false;
+        for tag in &tags {
+            if is_genre_tag(tag) {
+                has_genre = true;
+                if let Some(weight) = vibe_genres.get(tag) {
+                    overlap += weight;
+                }
+            } else if let Some(weight) = vibe_moods.get(tag) {
+                overlap += weight * 0.5;
+            }
+        }
+        if has_genre && !vibe_genres.is_empty() && overlap == 0.0 {
+            genre_conflict = true;
+        }
+        seed.weight += overlap * 0.5;
+        if seed.anchor {
+            seed.weight += 25.0;
+        } else if genre_conflict {
+            seed.weight = -1.0;
+        }
+    }
+    seeds.retain(|seed| seed.weight > 0.0);
+    seeds.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
+    seeds.truncate(if mode == "radio" { 3 } else { 5 });
 
     // Resolve seed video ids. Use the track's own id when we have one, else
     // search the best matching song by artist and title.
     let seed_futures: Vec<_> = seeds
         .iter()
-        .take(4)
+        .take(seeds.len())
         .map(|seed| {
             let client = state.http();
             let artist = seed.artist.clone();
@@ -783,68 +1069,96 @@ pub async fn vibe(state: &Shared, body: &Value) -> Value {
         candidates.extend(tracks);
     }
 
-    // Deduplicate + rank.
+    // Deduplicate + rank. Every candidate is checked against the anchor, the
+    // queue, history, skips and blocked artists. Genre/mood conflicts from
+    // generic providers are dropped; YTM mix rows are only downranked because
+    // the mix itself is already genre-derived and titles can be misleading.
+    let avoid = AvoidSet::from_body(body);
     let mut scored: HashMap<String, (Value, f64)> = HashMap::new();
-    let avoid_ids: Vec<String> = body
-        .get("avoid")
-        .and_then(|v| v.get("ids").and_then(|v| v.as_array()).cloned())
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|v| v.as_str().map(String::from))
-        .collect();
-    let avoid_keys: Vec<String> = body
-        .get("avoid")
-        .and_then(|v| v.get("keys").and_then(|v| v.as_array()).cloned())
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|v| v.as_str().map(String::from))
-        .collect();
     for (track, score) in candidates {
         let id = track.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let title = track.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let artist = track.get("artist").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let key = normalized_key(&title, &artist);
-        let family = family_key(&title, &artist);
-        if avoid_ids.iter().any(|a| a == &id) {
-            continue;
-        }
-        if avoid_keys.iter().any(|k| k == &key || k == &family) {
+        if avoid.blocks(&id, &title, &artist) {
             continue;
         }
         let duration = track.get("duration").and_then(|v| v.as_u64()).unwrap_or(0);
         if duration == 0 || duration > 720 {
             continue;
         }
-        let mut bonus = score;
+
+        let tags = taste::classify_text(&title, &artist);
+        let mut vibe_bonus = 0.0;
+        let mut genre_match = false;
+        let mut genre_conflict = false;
+        for tag in &tags {
+            if is_genre_tag(tag) {
+                if let Some(weight) = vibe_genres.get(tag) {
+                    vibe_bonus += 3.0 + weight.min(8.0);
+                    genre_match = true;
+                } else if !vibe_genres.is_empty() {
+                    genre_conflict = true;
+                }
+            } else if let Some(weight) = vibe_moods.get(tag) {
+                vibe_bonus += 2.0 + weight.min(6.0) * 0.5;
+            }
+        }
+        let source = track.get("source").and_then(|v| v.as_str()).unwrap_or("");
+        let from_mix = source == "ytmix" || source == "ytmusic" || source.is_empty();
+        if genre_conflict && !from_mix {
+            continue;
+        }
+        if genre_conflict {
+            vibe_bonus -= 12.0;
+        }
+        let mut bonus = score + vibe_bonus;
+        if genre_match {
+            bonus += 6.0;
+        }
         let artist_lower = artist.to_lowercase();
         for top in &top_artists {
             if artist_lower.contains(&top.to_lowercase()) {
-                bonus += 4.0;
+                bonus += 2.0;
             }
         }
-        let entry = scored.entry(key).or_insert_with(|| (track.clone(), 0.0));
-        entry.1 = entry.1.max(bonus);
+        let key = core_key(&title, &artist);
+        let entry = scored.entry(key).or_insert_with(|| (track.clone(), f64::NEG_INFINITY));
+        if bonus > entry.1 {
+            let mut track = track;
+            if let Some(map) = track.as_object_mut() {
+                map.insert("vibeTags".to_string(), json!(tags));
+            }
+            entry.0 = track;
+            entry.1 = bonus;
+        }
     }
 
     let mut picks: Vec<(Value, f64)> = scored.into_values().collect();
     picks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let anchor_artist = anchor
+        .as_ref()
+        .and_then(|a| a.get("artist"))
+        .and_then(|v| v.as_str())
+        .map(normalize_artist)
+        .unwrap_or_default();
+    let radio = mode == "radio";
     let mut per_artist: HashMap<String, u32> = HashMap::new();
-    let mut per_family: HashMap<String, u32> = HashMap::new();
+    let mut per_family: HashSet<String> = HashSet::new();
     let mut out: Vec<Value> = Vec::new();
     for (mut track, score) in picks {
         let artist = track.get("artist").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let title = track.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let count = per_artist.entry(normalize_artist(&artist)).or_insert(0);
-        if *count >= 2 {
+        let norm_artist = normalize_artist(&artist);
+        let cap = if radio && norm_artist != anchor_artist { 1 } else { 2 };
+        let count = per_artist.entry(norm_artist).or_insert(0);
+        if *count >= cap {
             continue;
         }
-        let fam = per_family.entry(family_key(&title, &artist)).or_insert(0);
-        if *fam >= 1 {
+        let fam = core_key(&title, &artist);
+        if !per_family.insert(fam) {
             continue;
         }
         *count += 1;
-        *fam += 1;
-        let title = track.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let search_query = format!("{artist} - {title}");
         if let Some(map) = track.as_object_mut() {
             map.insert("score".to_string(), json!(score));
@@ -857,49 +1171,83 @@ pub async fn vibe(state: &Shared, body: &Value) -> Value {
         }
     }
 
-    // Fallback: YTM search of top artists if we came up short.
+    // Fallback: stay inside the vibe instead of falling back to generic pop
+    // charts. Radio searches the anchor artist/genre; For You uses the top
+    // artists. Every fallback row goes through the same avoid/family gate.
     if out.len() < limit {
-        let cover = if top_artists.is_empty() {
-            vec![
-                "Top Hits 2026".to_string(),
-                "Trending Music".to_string(),
-                "Pop Hits".to_string(),
-            ]
-        } else {
-            top_artists.clone()
-        };
-        for artist in cover {
+        let mut queries: Vec<String> = Vec::new();
+        if let Some(anchor) = anchor.as_ref() {
+            let artist = anchor.get("artist").and_then(|v| v.as_str()).unwrap_or("");
+            let title = anchor.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            if !artist.is_empty() {
+                queries.push(format!("{artist} {title}"));
+                queries.push(format!("{artist} radio"));
+            }
+        }
+        if let Some((genre, _)) = vibe_genres.iter().max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal)) {
+            queries.push(format!("{genre} mix"));
+        }
+        queries.extend(top_artists.iter().take(4).cloned());
+        queries.dedup();
+
+        for query in queries {
             if out.len() >= limit {
                 break;
             }
-            if let Ok(tracks) = ytm::search(&state.http(), &artist, 6).await {
+            if let Ok(tracks) = ytm::search(&state.http(), &query, 8).await {
                 for track in tracks {
-                    let artist = track.get("artist").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let key = normalized_key(track.get("title").and_then(|v| v.as_str()).unwrap_or(""), &artist);
-                    if out.iter().any(|t| normalized_key(
-                        t.get("title").and_then(|v| v.as_str()).unwrap_or(""),
-                        t.get("artist").and_then(|v| v.as_str()).unwrap_or(""),
-                    ) == key) {
-                        continue;
-                    }
-                    let mut track = track;
-                    if let Some(map) = track.as_object_mut() {
-                        map.insert("source".to_string(), json!("ytmix"));
-                        map.insert("score".to_string(), json!(3.0));
-                        map.insert("searchQuery".to_string(), json!(format!("{artist}")));
-                        with_listener_fields(map, out.len());
-                    }
-                    out.push(track);
                     if out.len() >= limit {
                         break;
                     }
+                    let id = track.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let artist = track.get("artist").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let title = track.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    if avoid.blocks(&id, &title, &artist) {
+                        continue;
+                    }
+                    let fam = core_key(&title, &artist);
+                    if per_family.contains(&fam) {
+                        continue;
+                    }
+                    let norm_artist = normalize_artist(&artist);
+                    let count = per_artist.get(&norm_artist).copied().unwrap_or(0);
+                    if count >= if radio && norm_artist != anchor_artist { 1 } else { 2 } {
+                        continue;
+                    }
+                    let tags = taste::classify_text(&title, &artist);
+                    let mismatched = tags.iter().any(|tag| is_genre_tag(tag) && !vibe_genres.is_empty() && !vibe_genres.contains_key(tag));
+                    if mismatched {
+                        continue;
+                    }
+                    per_family.insert(fam);
+                    per_artist.insert(norm_artist, count + 1);
+                    let mut track = track;
+                    if let Some(map) = track.as_object_mut() {
+                        map.insert("source".to_string(), json!("ytsearch"));
+                        map.insert("vibeTags".to_string(), json!(tags));
+                        map.insert("score".to_string(), json!(3.0));
+                        map.insert("searchQuery".to_string(), json!(query));
+                        with_listener_fields(map, out.len());
+                    }
+                    out.push(track);
                 }
             }
         }
     }
 
-    cache_put(&state.stream_cache, cache_key, json!({ "profile": profile, "tracks": out }), 128, Duration::from_secs(20 * 60));
-    json!({ "success": true, "profile": profile, "tracks": out })
+    let vibe_payload = json!({
+        "genres": vibe_genres.iter().map(|(k, v)| json!({ "name": k, "weight": v })).collect::<Vec<_>>(),
+        "moods": vibe_moods.iter().map(|(k, v)| json!({ "name": k, "weight": v })).collect::<Vec<_>>(),
+        "mode": mode,
+    });
+    cache_put(
+        &state.stream_cache,
+        cache_key,
+        json!({ "profile": profile, "vibe": vibe_payload, "tracks": out }),
+        256,
+        Duration::from_secs(20 * 60),
+    );
+    json!({ "success": true, "profile": profile, "vibe": vibe_payload, "tracks": out })
 }
 
 // --------------------------------------------------------------- trending / chart / hot

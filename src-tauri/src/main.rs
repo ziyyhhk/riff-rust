@@ -11,6 +11,7 @@ mod state;
 mod tools;
 mod util;
 mod soundcloud;
+mod taste;
 mod ytm;
 
 use std::sync::Arc;
@@ -336,7 +337,7 @@ fn main() {
                 // (20 fps), while letting the GPU rasterize large panels then
                 // blocked the main thread for hundreds of ms on first paint.
                 // This keeps frames cheap without the GPU tile memory.
-                .additional_browser_args("--renderer-process-limit=1 --enable-low-end-device-mode --disable-gpu-rasterization --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection")
+                .additional_browser_args("--renderer-process-limit=1 --enable-low-end-device-mode --disable-gpu-rasterization --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --js-flags=--expose-gc")
                 .title("Riff Rust")
                 .inner_size(win_w, win_h)
                 .position(win_x, win_y)

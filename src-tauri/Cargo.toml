@@ -1,6 +1,6 @@
 [package]
 name = "riff-rust"
-version = "0.1.17"
+version = "0.1.18"
 description = "Riff Rust - a fast, low-memory desktop music player, rebuilt in Rust"
 authors = ["rootscripts", "Riff Rust contributors"]
 edition = "2021"

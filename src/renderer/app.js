@@ -6309,18 +6309,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const triggerRendererMemoryTrim = () => {
     try {
-      if (typeof window.gc === 'function') {
-        window.gc();
+      // A full GC pauses the renderer. Only trim when audio is idle, and let
+      // the browser schedule it between frames instead of on a fixed timer.
+      if (state.isPlaying || state.isLoadingTrack) return;
+      const run = () => {
+        try {
+          if (typeof window.gc === 'function') window.gc();
+        } catch (_) {}
+      };
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(run, { timeout: 4000 });
+      } else {
+        setTimeout(run, 800);
       }
     } catch (_) {}
   };
 
   window.addEventListener('blur', () => {
     setUnfocused(true);
-    setTimeout(triggerRendererMemoryTrim, 800);
+    setTimeout(triggerRendererMemoryTrim, 1500);
   });
   window.addEventListener('focus', () => setUnfocused(false));
-  setInterval(triggerRendererMemoryTrim, 30 * 1000);
+  setInterval(triggerRendererMemoryTrim, 60 * 1000);
 
   function applyVisualEffects() {
     const v = state.vfx;
@@ -7812,7 +7822,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     track.playedAt = Date.now();
     state.history = state.history.filter(t => !isSameTrack(t, track));
     state.history.unshift(track);
-    if (state.history.length > 100) state.history.pop();
+    if (state.history.length > 60) state.history.pop();
     localStorage.setItem('devsize_history', JSON.stringify(state.history));
     updateHistoryBadge();
     if (state.currentView === 'history') renderHistoryView();
@@ -13125,13 +13135,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         body: JSON.stringify({
           platform: 'youtube',
           limit: 12,
+          mode: 'radio',
+          anchor: current,
           clientProfile: taste,
           seeds: taste.seeds || [],
+          history: (state.history || []).slice(0, 30),
           avoid: getWaveAvoid()
         })
       }, 9000);
       if (data && data.success && Array.isArray(data.tracks)) {
-        wave = data.tracks.filter(t => usable(t) && !autoplayArtistList(t).some(a => queueArtists.has(normalizeArtistName(a))));
+        wave = data.tracks.filter(t => usable(t) && !trackRepeatsQueueOrHistory(t, 30) && !autoplayArtistList(t).some(a => queueArtists.has(normalizeArtistName(a))));
         wave.forEach(remember);
       }
     } catch (_) {}
@@ -13152,24 +13165,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (typeof isTrackBlocked === 'function' && isTrackBlocked(cand)) continue;
         if (typeof isArtistBlocked === 'function' && isArtistBlocked(cand.artist)) continue;
         if (typeof isTrackFailedOrUnavailable === 'function' && isTrackFailedOrUnavailable(cand)) continue;
-
-        const candKey = (cand.artist && cand.title && typeof getTrackNormalizedKey === 'function')
-          ? getTrackNormalizedKey(cand.artist, cand.title)
-          : '';
-        const candId = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(cand) : '') || cand.id;
-
-        const alreadyInQueue = state.queue.some(existing => {
-          if (!existing) return false;
-          const eId = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(existing) : '') || existing.id;
-          if (candId && eId && candId === eId) return true;
-          if (candKey && existing.artist && existing.title && typeof getTrackNormalizedKey === 'function') {
-            if (getTrackNormalizedKey(existing.artist, existing.title) === candKey) return true;
-          }
-          if (typeof isDuplicateOrVariantTrack === 'function' && isDuplicateOrVariantTrack(cand, existing)) return true;
-          return false;
-        });
-
-        if (alreadyInQueue) continue;
+        if (trackRepeatsQueueOrHistory(cand)) continue;
 
         cand._isAutoplay = true;
         state.queue.push(cand);
@@ -13212,6 +13208,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!state._autoplayAnchorSeeds || !state._autoplayAnchorSeeds.length) {
           state._autoplayAnchorSeeds = seeds;
         }
+        const profile = typeof computeTasteProfile === 'function' ? await computeTasteProfile() : null;
 
         const avoidIds = new Set();
         const avoidKeys = new Set();
@@ -13235,8 +13232,11 @@ document.addEventListener('DOMContentLoaded', async () => {
           platform: 'youtube',
           limit: 15,
           refresh: true,
+          mode: 'radio',
+          anchor: state.currentTrack,
           history: [],
           favorites: [],
+          clientProfile: profile,
           seeds,
           avoid: {
             ids: Array.from(avoidIds),
@@ -13259,27 +13259,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (typeof isTrackBlocked === 'function' && isTrackBlocked(tr)) continue;
             if (typeof isArtistBlocked === 'function' && isArtistBlocked(tr.artist)) continue;
             if (typeof isTrackFailedOrUnavailable === 'function' && isTrackFailedOrUnavailable(tr)) continue;
-
-            const trKey = (tr.artist && tr.title && typeof getTrackNormalizedKey === 'function')
-              ? getTrackNormalizedKey(tr.artist, tr.title)
-              : '';
-            const trId = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(tr) : '') || tr.id;
-
-            const matchesTrack = (existing) => {
-              if (!existing) return false;
-              const eId = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(existing) : '') || existing.id;
-              if (trId && eId && trId === eId) return true;
-              if (trKey && existing.artist && existing.title && typeof getTrackNormalizedKey === 'function') {
-                if (getTrackNormalizedKey(existing.artist, existing.title) === trKey) return true;
-              }
-              if (typeof isDuplicateOrVariantTrack === 'function' && isDuplicateOrVariantTrack(tr, existing)) return true;
-              return false;
-            };
-
-            if (state.queue.some(matchesTrack)) continue;
-            if (state._autoplayPool.some(matchesTrack)) continue;
+            if (trackRepeatsQueueOrHistory(tr)) continue;
 
             state._autoplayPool.push(tr);
+            if (state._autoplayPool.length > 24) state._autoplayPool.length = 24;
           }
 
           const addedMore = popFromPoolToQueue();
@@ -19621,7 +19604,7 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
       const res = await fetch(`http://127.0.0.1:${port}/api/vibe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ seeds, avoid, limit: 10, refresh: forceRefresh })
+        body: JSON.stringify({ seeds, avoid, limit: 10, mode: 'foryou', history: (state.history || []).slice(0, 30), refresh: forceRefresh })
       });
       const data = await res.json();
       if (data && data.success && Array.isArray(data.tracks)) {
@@ -21202,7 +21185,7 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
       const res = await fetch(`http://127.0.0.1:${port}/api/vibe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ seeds, avoid, limit: 10, refresh: forceRefresh })
+        body: JSON.stringify({ seeds, avoid, limit: 10, mode: 'foryou', history: (state.history || []).slice(0, 30), refresh: forceRefresh })
       });
       const data = await res.json();
       if (data && data.success && Array.isArray(data.tracks)) {
@@ -31664,8 +31647,8 @@ function bindCoverHoldZoom(wrapEl) {
   (function initUpdateUI() {
     const api = window.electronAPI;
     const $ = (id) => document.getElementById(id);
-    let currentAppVersion = '0.1.17';
-    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.17' : v;
+    let currentAppVersion = '0.1.18';
+    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.18' : v;
     if (api && api.getAppVersion) {
       api.getAppVersion().then((v) => {
         if (v) {
@@ -31748,7 +31731,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.1.17';
+      if (verEl) verEl.textContent = displayVer || 'v0.1.18';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -32331,7 +32314,7 @@ function bindCoverHoldZoom(wrapEl) {
     } catch (_) {}
   }
   refreshDiscordRpcStatus();
-  setInterval(refreshDiscordRpcStatus, 2500);
+  setInterval(refreshDiscordRpcStatus, 5000);
 
   function syncDiscordRpcUI() {
     if (btnDiscordRpc) {
@@ -35118,7 +35101,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.1.17';
+    let appVer = '0.1.18';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();
@@ -37588,7 +37571,7 @@ function bindCoverHoldZoom(wrapEl) {
     };
   }
 
-  async function computeTasteProfile(maxSeeds = 8) {
+  async function computeTasteProfileLocal(maxSeeds = 8) {
     const avoid = typeof getWaveAvoid === 'function' ? getWaveAvoid() : { keys: [], artists: [] };
     const feedback = typeof getMixFeedback === 'function' ? getMixFeedback() : null;
 
@@ -37823,6 +37806,78 @@ function bindCoverHoldZoom(wrapEl) {
     };
   }
 
+  // Taste profiling lives in Rust now: one IPC/HTTP round trip replaces the
+  // full scan and weight pass here, and the genre tags it resolves are the
+  // same ones the queue server filters on. The JS implementation stays as a
+  // fallback for a cold/offline server.
+  async function computeTasteProfile(maxSeeds = 8) {
+    const avoid = typeof getWaveAvoid === 'function' ? getWaveAvoid() : { keys: [], artists: [] };
+    const history = (state.history || []).slice(0, 60);
+    const favorites = (state.favorites || []).slice(0, 40);
+    const cacheKey = [
+      history.length,
+      history[0]?.id || history[0]?.title || '',
+      favorites.length,
+      maxSeeds
+    ].join('|');
+    const cached = state._tasteProfileCache;
+    if (cached && cached.key === cacheKey && (Date.now() - cached.ts) < 5 * 60 * 1000) {
+      return cached.profile;
+    }
+    try {
+      const res = await fetch(`http://127.0.0.1:${state.serverPort}/api/taste`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          history,
+          favorites,
+          maxSeeds,
+          windowDays: 7,
+          skipArtists: avoid.artists || [],
+          skipKeys: avoid.keys || []
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && data.profile && Array.isArray(data.profile.seeds)) {
+          const profile = data.profile;
+          state._tasteProfileCache = { key: cacheKey, ts: Date.now(), profile };
+          return profile;
+        }
+      }
+    } catch (_) {}
+    const profile = await computeTasteProfileLocal(maxSeeds);
+    state._tasteProfileCache = { key: cacheKey, ts: Date.now(), profile };
+    return profile;
+  }
+
+  // A track is a repeat when it matches anything already queued, anything in
+  // the recent history, or a remix/tekk variant of either. Every queue
+  // insertion path runs through this so a song cannot come back under a new
+  // upload name.
+  function trackRepeatsQueueOrHistory(track, historyLimit = 60) {
+    if (!track) return true;
+    const id = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(track) : '') || (track.id ? String(track.id) : '');
+    const key = (track.artist && track.title && typeof getTrackNormalizedKey === 'function')
+      ? getTrackNormalizedKey(track.artist, track.title)
+      : '';
+    const lists = [state.queue || [], (state.history || []).slice(0, historyLimit), state._autoplayPool || []];
+    const coreTitle = (typeof getCoreTitleRoot === 'function') ? getCoreTitleRoot(track.title) : '';
+    for (const list of lists) {
+      for (const existing of list) {
+        if (!existing) continue;
+        const eid = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(existing) : '') || (existing.id ? String(existing.id) : '');
+        if (id && eid && id === eid) return true;
+        if (key && existing.artist && existing.title && typeof getTrackNormalizedKey === 'function') {
+          if (getTrackNormalizedKey(existing.artist, existing.title) === key) return true;
+        }
+        if (coreTitle && coreTitle.length >= 8 && typeof getCoreTitleRoot === 'function' && getCoreTitleRoot(existing.title) === coreTitle) return true;
+        if (typeof isDuplicateOrVariantTrack === 'function' && isDuplicateOrVariantTrack(track, existing)) return true;
+      }
+    }
+    return false;
+  }
+
   function renderMyWaveChips(profile) {
     const chipsContainer = document.getElementById('my-wave-chips');
     if (chipsContainer) chipsContainer.innerHTML = '';
@@ -38044,11 +38099,40 @@ function bindCoverHoldZoom(wrapEl) {
 
   let currentWaveFocusedIndex = 0;
 
+  function buildRadioSeeds(profile, extraAnchor) {
+    const seeds = [];
+    const seen = new Set();
+    const add = (t, weight) => {
+      if (!t || !t.artist || !t.title) return;
+      const k = (typeof getTrackNormalizedKey === 'function') ? getTrackNormalizedKey(t.artist, t.title) : `${t.artist}::${t.title}`;
+      if (!k || k === '::' || seen.has(k)) return;
+      seen.add(k);
+      seeds.push({
+        artist: t.artist,
+        title: t.title,
+        id: t.id || '',
+        platform: t.platform || 'youtube',
+        weight
+      });
+    };
+    const anchor = extraAnchor || state.currentTrack || (state.queue && state.queue[state.queueIndex]);
+    add(anchor, 10);
+    const idx = Math.max(0, state.queueIndex || 0);
+    (state.queue || []).slice(idx + 1, idx + 4).forEach((t, i) => add(t, 3 - i * 0.5));
+    (state.history || []).slice(0, 3).forEach((t, i) => add(t, 2 - i * 0.5));
+    if (seeds.length === 0) {
+      (profile && Array.isArray(profile.seeds) ? profile.seeds : []).slice(0, 4).forEach((s, i) => add(s, 4 - i * 0.5));
+    }
+    return seeds.slice(0, 4);
+  }
+
   async function extendMyWaveQueue() {
     if (!state.myWaveActive || isExtendingMyWave) return false;
     isExtendingMyWave = true;
     try {
       const profile = await computeTasteProfile();
+      const anchor = state.currentTrack || (state.queue && state.queue[state.queueIndex]) || null;
+      const seeds = buildRadioSeeds(profile, anchor);
       const baseAvoid = typeof getWaveAvoid === 'function' ? getWaveAvoid() : { ids: [], keys: [], artists: [] };
       const avoidIds = new Set(Array.isArray(baseAvoid.ids) ? baseAvoid.ids : []);
       const avoidKeys = new Set(Array.isArray(baseAvoid.keys) ? baseAvoid.keys : []);
@@ -38072,25 +38156,16 @@ function bindCoverHoldZoom(wrapEl) {
           favorites: (state.favorites || []).slice(0, 25),
           platform: 'youtube',
           limit: 8,
+          mode: 'radio',
+          anchor,
           clientProfile: profile,
-          seeds: profile.seeds,
+          seeds,
           avoid: mergedAvoid
         })
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.tracks) && data.tracks.length > 0) {
-        const existingIds = new Set(avoidIds);
-        const existingKeys = new Set(avoidKeys);
-        const newTracks = [];
-        for (const t of data.tracks) {
-          if (!t) continue;
-          const cid = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(t) : '') || (t.id ? String(t.id).trim() : '');
-          const nkey = (t.artist && t.title && typeof getTrackNormalizedKey === 'function') ? getTrackNormalizedKey(t.artist, t.title) : '';
-          if ((cid && existingIds.has(cid)) || (nkey && existingKeys.has(nkey))) continue;
-          if (cid) existingIds.add(cid);
-          if (nkey) existingKeys.add(nkey);
-          newTracks.push(t);
-        }
+        const newTracks = data.tracks.filter(t => t && t.title && !trackRepeatsQueueOrHistory(t));
         if (newTracks.length > 0) {
           state.queue.push(...newTracks);
           updateQueueBadge();
@@ -38115,6 +38190,8 @@ function bindCoverHoldZoom(wrapEl) {
     try {
       const port = state.serverPort || 38472;
       const taste = typeof computeTasteProfile === 'function' ? await computeTasteProfile() : { seeds: [], topArtists: [] };
+      const anchor = state.currentTrack || (state.queue && state.queue[state.queueIndex]) || null;
+      const seeds = buildRadioSeeds(taste, anchor);
       const baseAvoid = typeof getWaveAvoid === 'function' ? getWaveAvoid() : { ids: [], keys: [], artists: [] };
       const seenIds = new Set(Array.isArray(baseAvoid.ids) ? baseAvoid.ids : []);
       const seenKeys = new Set(Array.isArray(baseAvoid.keys) ? baseAvoid.keys : []);
@@ -38138,23 +38215,16 @@ function bindCoverHoldZoom(wrapEl) {
           favorites: (state.favorites || []).slice(0, 25),
           platform: 'youtube',
           limit: 12,
+          mode: 'radio',
+          anchor,
           clientProfile: taste,
-          seeds: taste.seeds || [],
+          seeds,
           avoid: mergedAvoid
         })
       });
       const data = await res.json();
       const incoming = Array.isArray(data && data.tracks) ? data.tracks : [];
-      const fresh = [];
-      for (const t of incoming) {
-        if (!t || !t.title || (!t.id && !t.url)) continue;
-        const tid = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(t) : '') || (t.id ? String(t.id).trim() : '');
-        const tkey = (t.artist && t.title && typeof getTrackNormalizedKey === 'function') ? getTrackNormalizedKey(t.artist, t.title) : '';
-        if ((tid && seenIds.has(tid)) || (tkey && seenKeys.has(tkey))) continue;
-        if (tid) seenIds.add(tid);
-        if (tkey) seenKeys.add(tkey);
-        fresh.push(t);
-      }
+      const fresh = incoming.filter(t => t && t.title && (t.id || t.url) && !trackRepeatsQueueOrHistory(t));
       if (fresh.length > 0) {
         const startIdx = state.queue.length;
         state.queue.push(...fresh);
@@ -38801,7 +38871,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof renderSpotifyHome === 'function') renderSpotifyHome();
       const item = window.HomeCache && window.HomeCache.store && window.HomeCache.store['home_vibe'];
       const ts = (item && item.ts) ? item.ts : (safeJson('riff_my_wave_cache', null)?.ts || 0);
-      if (Date.now() - ts < 4 * 3600 * 1000) return true;
+      if (Date.now() - ts < 30 * 60 * 1000) return true;
     }
     return await loadHomePage(forceRefresh);
   }
@@ -38855,6 +38925,7 @@ function bindCoverHoldZoom(wrapEl) {
         favorites: (state.favorites || []).slice(0, 25),
         platform: 'youtube',
         limit: 10,
+        mode: 'foryou',
         clientProfile: profile,
         seeds: profile.seeds,
         avoid: getWaveAvoid()
@@ -39608,6 +39679,7 @@ function bindCoverHoldZoom(wrapEl) {
           favorites: (state.favorites || []).slice(0, 25),
           platform: 'youtube',
           limit: 20,
+          mode: 'foryou',
           clientProfile: profile,
           seeds: bucket.seeds,
           avoid: {
@@ -41786,7 +41858,10 @@ function bindCoverHoldZoom(wrapEl) {
       });
     });
     window.addEventListener('resize', updateTabLine);
-    setInterval(() => refresh(false), 700);
+    setInterval(() => {
+      if (document.hidden) return;
+      refresh(false);
+    }, 1500);
     localStorage.removeItem('riff_queue_panel_open');
   }
 

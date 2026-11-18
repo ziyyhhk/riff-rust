@@ -2073,6 +2073,18 @@ async fn vibe(State(state): State<Shared>, Json(body): Json<Value>) -> Response 
     }
 }
 
+async fn taste_profile(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(8),
+        crate::taste::profile(&state, &body),
+    )
+    .await
+    {
+        Ok(payload) => json_ok(payload),
+        Err(_) => json_ok(json!({ "success": false, "profile": Value::Null, "error": "timeout" })),
+    }
+}
+
 async fn hot(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
     json_ok(crate::discovery::hot(&state, &q).await)
 }
@@ -3138,6 +3150,7 @@ pub fn build_router(state: Shared) -> Router {
         .route("/api/hot", get(hot))
         .route("/api/top-chart", get(top_chart))
         .route("/api/vibe", post(vibe))
+        .route("/api/taste", post(taste_profile))
         .route("/api/track-analysis", get(stub_unported))
         .route("/api/artist", get(artist))
         .route("/api/prefetch", get(prefetch_track))

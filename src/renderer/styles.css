@@ -269,8 +269,8 @@ body.hide-titlebar .titlebar {
   pointer-events: none;
   z-index: 10001;
   background: var(--md-sys-color-surface, rgba(24, 24, 27, 0.94)) !important;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--md-sys-color-outline-variant, rgba(255, 255, 255, 0.08));
   transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms ease;
 }
@@ -710,7 +710,6 @@ body.is-window-resizing .platform-switch-container {
   margin-left: -24px;
   top: 0;
   pointer-events: none;
-  will-change: transform, height, opacity;
   transform-origin: center top;
   opacity: 1;
   transition: opacity 220ms ease !important;
@@ -974,8 +973,8 @@ body.perf .app-icon-option-box {
   width: 280px;
   max-width: 280px;
   background: var(--md-sys-color-surface-container);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: none;
   box-shadow: none;
   padding: 16px 12px;
@@ -1350,7 +1349,7 @@ main section[id^="view-"]:not(.active),
   inset: 0;
   background-size: cover;
   background-position: center;
-  filter: blur(70px) saturate(1.4);
+  filter: blur(28px) saturate(1.4);
   opacity: 0;
   transition: opacity 500ms ease;
   pointer-events: none;
@@ -1408,8 +1407,8 @@ body.perf .my-wave-ambient-light {
   display: flex;
   flex-direction: column;
   align-items: center;
+  contain: layout paint;
   transition: transform 220ms cubic-bezier(0.2, 0, 0, 1), opacity 220ms ease, filter 220ms ease;
-  will-change: transform, opacity;
 }
 
 .my-wave-track-cover-wrap {
@@ -1759,6 +1758,7 @@ body.perf .my-wave-ambient-light {
   background-color: transparent;
   border: none;
   position: relative;
+  contain: layout;
   cursor: pointer;
   transform: none !important;
   transition: background-color 80ms ease !important;
@@ -2026,7 +2026,6 @@ body.perf .artist-link-part { transition: none !important; }
   width: 100%;
   height: 100%;
   transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: transform;
 }
 .artist-banner-slide {
   flex: 0 0 100%;
@@ -2115,8 +2114,8 @@ body.perf .artist-link-part { transition: none !important; }
   border-radius: var(--md-shape-corner-full, 9999px);
   background: color-mix(in srgb, #000 55%, transparent);
   color: #fff;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   border: none;
   display: inline-flex;
   align-items: center;
@@ -2221,8 +2220,8 @@ body.perf .artist-m3-cookie-badge .m3-cookie-shape {
   padding: 14px 16px;
   border-radius: 16px;
   background: color-mix(in srgb, var(--md-sys-color-surface-container) 85%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   z-index: 2;
   box-sizing: border-box;
 }
@@ -3111,8 +3110,8 @@ body.show-source-logo .track-source-logo-badge {
   padding: 5px 10px !important;
   border-radius: 999px !important;
   background: color-mix(in srgb, var(--md-sys-color-surface-container-highest-solid, #2b2930) 78%, transparent) !important;
-  backdrop-filter: blur(14px) !important;
-  -webkit-backdrop-filter: blur(14px) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
   pointer-events: auto !important;
   opacity: 0;
   transform: translateY(-6px);
@@ -3322,8 +3321,8 @@ body.perf .lyric-paren-tail {
   color: var(--md-sys-color-on-surface-variant, #ccc);
   font-size: 13px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   user-select: none;
 }
 .lyrics-notice-close {
@@ -3507,7 +3506,6 @@ body.perf .lyric-gap-bars .gap-bar {
   z-index: 9999 !important;
   border: none;
   transform: translateZ(0);
-  will-change: transform;
   transition: background-color var(--transition-emphasized), transform var(--transition-emphasized);
   overflow: visible !important;
 }
@@ -4176,8 +4174,8 @@ body.perf .playbar .time-label { transition: none !important; }
   width: 100vw;
   height: 100vh;
   background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4214,8 +4212,8 @@ body.perf .playbar .time-label { transition: none !important; }
   width: 440px;
   max-height: 85vh;
   background: var(--md-sys-color-surface-container-high);
-  backdrop-filter: blur(24px) saturate(1.2);
-  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  backdrop-filter: blur(10px) saturate(1.2);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
   border: none;
   border-radius: var(--md-shape-corner-xl);
   padding: 24px;
@@ -4226,7 +4224,6 @@ body.perf .playbar .time-label { transition: none !important; }
   transform-origin: center center;
   transform: scale(0.96);
   opacity: 0;
-  will-change: transform, opacity;
   transition: transform 180ms cubic-bezier(0.2, 0, 0, 1), opacity 180ms cubic-bezier(0.2, 0, 0, 1), background-color var(--transition-emphasized);
 }
 .modal-backdrop.visible .settings-card,
@@ -5755,8 +5752,8 @@ body.perf .toast-badge { animation: none !important; }
   border: none !important;
   outline: none !important;
   background: color-mix(in srgb, var(--md-sys-color-background-solid, #141418) var(--surface-alpha), transparent) !important;
-  backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
+  backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
   border-radius: 18px !important;
   padding: 6px !important;
   box-sizing: border-box !important;
@@ -5849,7 +5846,6 @@ body.perf .toast-badge { animation: none !important; }
 .full-width { width: 100%; }
 
 .btn-icon-pill, .pill-btn, button[class*="pill"] {
-  will-change: border-radius, transform;
   transform: translateZ(0);
 }
 
@@ -6419,8 +6415,8 @@ button::after, .chip-btn::after, .mix-card::after, .track-row::after, .rail-icon
 *:focus, *:focus-visible { outline: none !important; }
 
 .cache-backdrop {
-  backdrop-filter: blur(12px) saturate(180%);
-  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  backdrop-filter: blur(7px) saturate(180%);
+  -webkit-backdrop-filter: blur(7px) saturate(180%);
   background: rgba(0, 0, 0, 0.4);
 }
 .cache-modal-card {
@@ -7336,7 +7332,6 @@ body.intensity-zero .lyric-word.active-word { opacity: 1; color: var(--md-sys-co
   pointer-events: none !important;
   background: var(--tvk-base, #0a0a0e) !important;
   filter: blur(var(--tvk-bg-blur, 22px)) saturate(1.95) contrast(1.12) !important;
-  will-change: transform;
   transition: background-color 0.8s ease;
 }
 .tv-karaoke::before {
@@ -7549,7 +7544,7 @@ body.perf .tvk-ambient-blob {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(7px);
   transition: opacity 0.3s ease, background 0.2s ease, transform 0.2s ease;
 }
 .tv-karaoke-close:hover {
@@ -8122,7 +8117,6 @@ body.mini .playbar {
   border: none !important;
   z-index: 9999 !important;
   transform: translateZ(0);
-  will-change: transform;
 }
 body.mini.mini-lyrics-on .playbar {
   grid-template-rows: auto 1fr auto !important;
@@ -8541,8 +8535,8 @@ input[type="range"].pill-range::-moz-range-thumb {
   background: radial-gradient(120% 80% at 50% 0%, rgba(12, 12, 14, 0.86), rgba(8, 8, 10, 0.78)) !important;
   -webkit-mask-image: none !important;
   mask-image: none !important;
-  backdrop-filter: blur(14px) saturate(110%) !important;
-  -webkit-backdrop-filter: blur(14px) saturate(110%) !important;
+  backdrop-filter: blur(8px) saturate(110%) !important;
+  -webkit-backdrop-filter: blur(8px) saturate(110%) !important;
   filter: none !important;
   transform: none !important;
   will-change: auto !important;
@@ -8810,7 +8804,7 @@ body.highlight-buttons .btn-pill-primary { background: var(--md-sys-color-primar
 @keyframes connectedCollapse { 0% { clip-path: inset(0 -30px 0 -30px round 24px 24px 0 0); } 100% { clip-path: inset(100% -30px 0 -30px round 24px 24px 0 0); } }
 @keyframes connectedContentIn { 0%, 30% { opacity: 0; transform: translateY(8px); } 100% { opacity: 1; transform: translateY(0); } }
 @keyframes connectedContentOut { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(4px); } }
-.audio-menu-card.connected-editor { position: fixed; bottom: 104px; right: 64px; width: min(580px, calc(100vw - 60px)) !important; height: 480px !important; max-height: calc(100vh - 124px) !important; padding: 16px !important; border-radius: 24px 24px 0 0 !important; overflow: visible !important; backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important; -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important; transform: none !important; animation: connectedExpand 320ms cubic-bezier(0.2, 0, 0, 1) both; box-shadow: none !important; z-index: 9998 !important; opacity: 1 !important; }
+.audio-menu-card.connected-editor { position: fixed; bottom: 104px; right: 64px; width: min(580px, calc(100vw - 60px)) !important; height: 480px !important; max-height: calc(100vh - 124px) !important; padding: 16px !important; border-radius: 24px 24px 0 0 !important; overflow: visible !important; backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important; -webkit-backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important; transform: none !important; animation: connectedExpand 320ms cubic-bezier(0.2, 0, 0, 1) both; box-shadow: none !important; z-index: 9998 !important; opacity: 1 !important; }
 .audio-menu-card.connected-editor.connected-closing { animation: connectedCollapse 200ms cubic-bezier(0.2, 0, 0, 1) both; }
 .audio-menu-card.connected-editor .settings-card-header, .audio-menu-card.connected-editor .audio-modal-layout { animation: connectedContentIn 320ms cubic-bezier(0.2, 0, 0, 1) both; }
 .audio-menu-card.connected-editor.connected-closing .settings-card-header, .audio-menu-card.connected-editor.connected-closing .audio-modal-layout { animation: connectedContentOut 120ms cubic-bezier(0.2, 0, 0, 1) both; }
@@ -9456,7 +9450,7 @@ body.perf .cpm-service-btn {
 }
 
 .home-hero { position: relative; height: 100%; min-height: 520px; overflow: hidden; }
-.home-hero-track { height: 100%; display: flex; flex-direction: column; transition: transform 450ms cubic-bezier(0.2, 0, 0, 1); will-change: transform; }
+.home-hero-track { height: 100%; display: flex; flex-direction: column; transition: transform 450ms cubic-bezier(0.2, 0, 0, 1); }
 .home-pane { position: relative; flex: 0 0 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; overflow: hidden; }
 .home-hero-dots {
   position: absolute;
@@ -9567,7 +9561,7 @@ body.perf .home-hero-track { transition: none; }
 #view-discover { position: relative; isolation: isolate; overflow: hidden; border-radius: inherit; min-height: 100%; height: 100%; }
 #view-discover > *:not(.home-ambient) { position: relative; z-index: 1; }
 .home-ambient { position: absolute; inset: -60px; z-index: 0; overflow: hidden; pointer-events: none; }
-.home-ambient-layer { position: absolute; inset: -25%; filter: blur(42px) saturate(1.6) !important; opacity: 0; transition: opacity 700ms ease; will-change: opacity; pointer-events: none; }
+.home-ambient-layer { position: absolute; inset: -25%; filter: blur(28px) saturate(1.6) !important; opacity: 0; transition: opacity 700ms ease; will-change: opacity; pointer-events: none; }
 .home-ambient-layer.on { opacity: 0.85; }
 #my-wave-ambient-light { display: none !important; }
 body.perf .home-ambient-layer { filter: none; opacity: 0.3; }
@@ -9660,15 +9654,15 @@ body.perf .home-out, body.perf .home-in {
 }
 body.cover-bg-on #cover-bg { display: block; }
 body.cover-bg-on #custom-bg, body.cover-bg-on .bg-mesh-layer { display: none; }
-.cover-bg-layer { position: absolute; inset: -15%; background-size: cover; background-position: center; filter: blur(22px) saturate(1.3) !important; opacity: 0; transition: opacity 700ms ease; will-change: opacity; }
+.cover-bg-layer { position: absolute; inset: -15%; background-size: cover; background-position: center; filter: blur(16px) saturate(1.3) !important; opacity: 0; transition: opacity 700ms ease; will-change: opacity; }
 .cover-bg-layer.on { opacity: var(--cover-bg-brightness, .45); }
 body.cover-bg-on .app-layout,
 body.cover-bg-on .main-content {
   background: transparent !important;
 }
 body.cover-bg-on :is(.sidebar, .playbar, .top-nav) {
-  backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
+  backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
 }
 body.perf #cover-bg { display: none; }
 body.perf #playlist-hero-fx,
@@ -9749,7 +9743,7 @@ body.no-clip-fx .main-content { background: transparent !important; }
 .search-playlist-card .search-playlist-add-btn.saved {
   background: rgba(30, 30, 30, 0.85);
   color: #4caf50;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(6px);
 }
 
 :is(.sp-row, .sp-quick, .search-albums-row, .search-playlists-row, .fav-artists-row, .artist-albums-shelf, #sp-made, #sp-quick, #sp-trend, #sp-artists, #home-vibe-grid),
@@ -9899,8 +9893,8 @@ body.no-clip-fx .main-content { background: transparent !important; }
   padding: 20px;
   border-radius: 24px;
   background: color-mix(in srgb, var(--md-sys-color-surface-container) 72%, transparent);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 body.perf .album-side {
   backdrop-filter: none !important;
@@ -10117,7 +10111,7 @@ body.cover-bg-on.theme-light .cover-bg-layer.on,
 body.cover-bg-on.light .cover-bg-layer.on,
 body.cover-bg-on[data-theme="light"] .cover-bg-layer.on {
   opacity: calc(var(--cover-bg-brightness, 0.45) * 0.4) !important;
-  filter: blur(90px) saturate(1.1) brightness(1.15) !important;
+  filter: blur(28px) saturate(1.1) brightness(1.15) !important;
 }
 
 .presets-chips-container {
@@ -10700,7 +10694,7 @@ body.no-progress-bg .scrubber-rail {
 .ct-actions { display: flex; gap: 8px; }
 .plugins-warn { color: var(--md-sys-color-error); }
 
-.m3c-wrap { position: relative; width: 72px; height: 72px; aspect-ratio: 1 / 1; flex: none; display: flex; align-items: center; justify-content: center; overflow: visible !important; will-change: transform; }
+.m3c-wrap { position: relative; width: 72px; height: 72px; aspect-ratio: 1 / 1; flex: none; display: flex; align-items: center; justify-content: center; overflow: visible !important; }
 .m3c-wrap > img { width: 100%; height: 100%; border-radius: var(--md-shape-corner-medium, 12px); object-fit: cover; display: block; }
 .m3c-canvas { display: none; position: absolute; left: 50%; top: 50%; width: 120px; height: 120px; transform: translate(-50%, -50%); pointer-events: none; }
 body.m3-cover-on .m3c-wrap > img { visibility: hidden; }
@@ -10801,6 +10795,7 @@ body:not(.home-spotify) #sp-home { display: none; }
 .sp-card.has-cover-tint {
   cursor: pointer;
   min-width: 0;
+  contain: layout paint;
   padding: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
@@ -11834,8 +11829,8 @@ body.perf .btn-proxy-remove {
   padding: 8px;
   border-radius: 20px;
   background: color-mix(in srgb, var(--md-sys-color-background-solid, #121212) var(--surface-alpha), transparent) !important;
-  backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
+  backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
   color: var(--md-sys-color-on-surface, #f2f2f2);
   box-shadow: none !important;
   border: none !important;
@@ -11908,8 +11903,8 @@ body.perf .riff-ctx-menu {
   padding: 6px 11px;
   border-radius: 8px;
   background: color-mix(in srgb, var(--md-sys-color-background-solid, #121212) 72%, transparent) !important;
-  backdrop-filter: blur(18px) !important;
-  -webkit-backdrop-filter: blur(18px) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
   color: color-mix(in srgb, var(--md-sys-color-on-surface, #ffffff) 82%, transparent) !important;
   font-size: 11.5px;
   font-weight: 500;
@@ -12003,8 +11998,8 @@ body.perf .bulk-select-bar {
   inset: 0 !important;
   z-index: 99990 !important;
   background: rgba(6, 6, 9, 0.58) !important;
-  backdrop-filter: blur(18px) saturate(1.15) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(1.15) !important;
+  backdrop-filter: blur(10px) saturate(1.15) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(1.15) !important;
   display: flex !important;
   align-items: flex-end !important;
   justify-content: center !important;
@@ -12429,8 +12424,8 @@ body:is(.has-custom-bg, .has-video-bg) .bg-mesh-layer {
 
 body:is(.has-custom-bg, .has-video-bg, .cover-bg-on) .sidebar {
   background: var(--panel-bg) !important;
-  backdrop-filter: blur(24px) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(140%) !important;
+  backdrop-filter: blur(10px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(140%) !important;
 }
 
 body:not(.classic-sidebar):not(.mini):not(.cover-bg-on):not(.has-video-bg):not(.has-custom-bg) {
@@ -12537,8 +12532,8 @@ body:not(.classic-sidebar):not(.mini) .rail-drawer {
   bottom: 96px !important;
   height: auto !important;
   background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--surface-alpha), transparent) !important;
-  backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
+  backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
   border-radius: 0 28px 28px 0 !important;
   overflow: visible !important;
   z-index: 3500 !important;
@@ -12777,8 +12772,8 @@ body.classic-sidebar.sidebar-expanded:not(.mini) .rail-drawer {
   max-height: 100% !important;
   border-radius: 10px !important;
   background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--surface-alpha), transparent) !important;
-  backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
+  backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important;
   border: 1px solid var(--md-sys-color-outline-variant, rgba(255, 255, 255, 0.08)) !important;
   z-index: 3500 !important;
@@ -12847,8 +12842,8 @@ body.perf .m3-btn-shape-spinner,
   inset: 0;
   z-index: 100000;
   background: rgba(8, 8, 12, 0.65);
-  backdrop-filter: blur(18px) saturate(1.2);
-  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  backdrop-filter: blur(10px) saturate(1.2);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -12913,8 +12908,8 @@ body.perf .i18n-shape-box {
   display: flex;
   flex-direction: column;
   background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--surface-alpha), transparent) !important;
-  backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
+  backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
   color: var(--md-sys-color-on-surface);
   border-radius: 24px;
   box-shadow: none !important;
@@ -13148,13 +13143,12 @@ body.perf .riff-orbit-item,
   box-shadow: none !important;
   border: none !important;
   background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--surface-alpha), transparent) !important;
-  backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
+  backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
   opacity: 0;
   transform: scale(0.92) translateZ(0);
   transform-origin: center center;
   pointer-events: none;
-  will-change: transform, opacity;
   backface-visibility: hidden;
   contain: layout paint;
   transition: opacity 160ms ease, transform 190ms cubic-bezier(0.2, 0, 0, 1);
@@ -13169,8 +13163,8 @@ body.perf .search-history-panel {
 }
 body:not(.perf) :is(.np-queue-panel, #np-queue-panel, #rail-drawer, .rail-drawer, .audio-menu-card, #audio-menu, .audio-menu-card.connected-editor, .m3-dropdown-menu, .m3-dropdown-panel, .riff-ctx-menu, .search-history-panel, .lyrics-action-sheet, .lyrics-panel-sheet, #view-settings .settings-view) {
   background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--surface-alpha), transparent) !important;
-  backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
+  backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
   box-shadow: none !important;
 }
 .search-history-panel.hidden { display: none !important; opacity: 0; pointer-events: none; }
@@ -13611,7 +13605,6 @@ body.perf .sb-home-banner-Action {
   background: var(--md-sys-color-on-surface, #ffffff) !important;
   pointer-events: none !important;
   z-index: 5 !important;
-  will-change: transform, width;
   transition: transform 240ms cubic-bezier(0.2, 0.85, 0.2, 1), width 240ms cubic-bezier(0.2, 0.85, 0.2, 1) !important;
 }
 .sb-horiz-tab::before {
@@ -14032,8 +14025,8 @@ body:not(.cover-bg-on) .cover-bg-layer {
 body.perf .account-avatar-overlay { transition: none !important; }
 body:not(.perf) :is(.np-queue-panel, #np-queue-panel, #rail-drawer, .rail-drawer, .audio-menu-card, #audio-menu, .audio-menu-card.connected-editor, .m3-dropdown-menu, .m3-dropdown-panel, .riff-ctx-menu, .search-history-panel, .lyrics-action-sheet, .lyrics-panel-sheet, #view-settings .settings-view) {
   background: color-mix(in srgb, var(--md-sys-color-surface-container-high-solid, #28292C) var(--surface-alpha), transparent) !important;
-  backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(140%) !important;
+  backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(var(--panel-blur, 10px)) saturate(140%) !important;
   box-shadow: none !important;
 }
 .tg-account-center,
@@ -14077,7 +14070,7 @@ body.perf #view-settings .settings-view {
   background: color-mix(in srgb, var(--md-sys-color-surface-container-solid, #1E1F22) calc(var(--surface-alpha) * 0.65), transparent) !important;
 }
 :root {
-  --panel-blur: 24px;
+  --panel-blur: 10px;
 }
 body.no-panel-blur :is(.np-queue-panel, #np-queue-panel, #rail-drawer, .rail-drawer, .audio-menu-card, #audio-menu, .audio-menu-card.connected-editor, .m3-dropdown-menu, .m3-dropdown-panel, .riff-ctx-menu, .search-history-panel, .lyrics-action-sheet, .lyrics-panel-sheet, #view-settings .settings-view) {
   backdrop-filter: none !important;
@@ -14643,8 +14636,8 @@ body.perf .tg-pat-meme.switching {
   padding: 8px 12px;
   border-radius: 12px;
   background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest-solid, #121214) 72%, transparent) !important;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   color: var(--md-sys-color-on-surface, #fff);
   font-size: 11.5px;
   font-weight: 500;
@@ -14974,8 +14967,8 @@ body:not(.np-align-center) .right-panel .right-panel-meta {
   padding: 3px 8px 3px 6px;
   border-radius: 999px;
   background: rgba(14, 14, 18, 0.72);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   color: #e3e3e3;
   font-size: 11px;
   font-weight: 700;
@@ -16500,8 +16493,8 @@ body:not(.hide-sp-table-cols) :is(#favorites-tracks-list, #playlist-tracks-list)
   padding: 8px 12px !important;
   border-radius: 12px !important;
   background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest-solid, #121214) 75%, transparent) !important;
-  backdrop-filter: blur(16px) !important;
-  -webkit-backdrop-filter: blur(16px) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
   color: var(--md-sys-color-on-surface, #fff) !important;
   font-size: 11.5px !important;
   font-weight: 500 !important;
@@ -16917,6 +16910,6 @@ body:is(.has-custom-bg, .has-video-bg, .cover-bg-on) .sp-card:hover {
    translucency the user picked. */
 body:is(.has-custom-bg, .has-video-bg, .cover-bg-on) .sidebar {
   background: #141419 !important;
-  backdrop-filter: blur(24px) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(140%) !important;
+  backdrop-filter: blur(10px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(140%) !important;
 }
