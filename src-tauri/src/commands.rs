@@ -400,6 +400,12 @@ pub fn get_gpu_compositing() -> serde_json::Value {
     serde_json::json!({ "enabled": true, "backend": "webview2" })
 }
 
+#[tauri::command]
+pub fn trim_memory() -> bool {
+    crate::trim_working_sets();
+    true
+}
+
 // ------------------------------------------------------------ file picking
 // (Dialogs are driven from the JS side through the dialog plugin; these
 // commands do the filesystem work that has to happen natively.)
@@ -407,6 +413,12 @@ pub fn get_gpu_compositing() -> serde_json::Value {
 #[tauri::command]
 pub fn import_audio_files(paths: Vec<String>) -> Vec<serde_json::Value> {
     crate::library::import_audio_files(&paths)
+}
+
+#[tauri::command]
+pub async fn import_universal_files(paths: Vec<String>) -> Vec<serde_json::Value> {
+    let handle = tokio::task::spawn_blocking(move || crate::library::import_universal_files(&paths));
+    handle.await.unwrap_or_default()
 }
 
 #[tauri::command]

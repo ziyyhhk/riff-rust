@@ -100,6 +100,7 @@
 
     // --- gpu / proxy ---
     getGpuCompositing: () => invoke('get_gpu_compositing'),
+    trimMemory: () => invoke('trim_memory'),
     setAppProxy: (proxyUrl) => invoke('set_app_proxy', { proxyUrl }),
 
     // --- file dialogs (driven by the dialog plugin's JS API) ---
@@ -118,6 +119,11 @@
       const files = await pickFiles({ multiple: true, filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'flac', 'opus', 'ogg', 'oga', 'm4a', 'aac', 'webm', 'weba'] }] });
       if (!files || files.length === 0) return [];
       return invoke('import_audio_files', { paths: files });
+    },
+    importUniversalFiles: async () => {
+      const files = await pickFiles({ multiple: true });
+      if (!files || files.length === 0) return [];
+      return invoke('import_universal_files', { paths: files });
     },
     pickLocalFiles: async () => {
       const files = await pickFiles({ multiple: true, filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'flac', 'opus', 'ogg', 'oga', 'm4a', 'aac', 'webm', 'weba'] }] });

@@ -5009,7 +5009,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       el.scrubberCanvas = scrubberCanvas;
       if (!el.scrubberTrack._roBound && window.ResizeObserver) {
         el.scrubberTrack._roBound = true;
-        new ResizeObserver(() => resizeCanvases()).observe(el.scrubberTrack);
+        let roLast = 0;
+        new ResizeObserver(() => {
+          const now = performance.now();
+          if (now - roLast < 90) return;
+          roLast = now;
+          resizeCanvases();
+        }).observe(el.scrubberTrack);
       }
       const rw = Math.max(100, el.scrubberTrack.clientWidth || Math.round(el.scrubberTrack.getBoundingClientRect().width) || 300);
       const rh = 40;
@@ -5448,6 +5454,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     let freqData = bufferLength > 0 ? new Uint8Array(bufferLength) : null;
 
     function renderLoop(timestamp) {
+      if (window.riffPaused && !state.isPlaying) {
+        animationFrameId = null;
+        return;
+      }
       if (document.hidden || !state.isWindowVisible) {
         animationFrameId = null;
         if (audioEngine && audioEngine.setAnalyserEnabled) audioEngine.setAnalyserEnabled(false);
@@ -15144,6 +15154,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (!data || !data.success || !Array.isArray(data.tracks) || data.tracks.length === 0) {
           if (!hasRenderedFromCache) {
+            if (listEl) {
+              listEl.innerHTML = '<div style="padding: 32px 16px; text-align: center; color: var(--md-sys-color-outline); font-size: calc(13px * var(--font-scale, 1));">No tracks available for this album.</div>';
+            }
             throw new Error(data && data.error ? data.error : 'Failed to load album tracks');
           }
           return;
@@ -18840,6 +18853,23 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
             }
           };
           el.artistHeroImg.src = banner;
+        } else if (state.currentTrack) {
+          // Artist had no photo anywhere, fall back to the current track art so
+          // the hero is never empty.
+          const ct = (typeof getTrackThumbUrl === 'function' ? getTrackThumbUrl(state.currentTrack) : '') || state.currentTrack.thumbnail || state.currentTrack.cover || '';
+          if (ct) {
+            el.artistHeroImg.onload = () => { if (state.artistLoadToken === myArtistToken) el.artistHeroImg.style.opacity = '1'; };
+            el.artistHeroImg.onerror = () => { el.artistHeroImg.style.display = 'none'; };
+            el.artistHeroImg.style.opacity = '0';
+            el.artistHeroImg.style.display = 'block';
+            el.artistHeroImg.src = ct;
+          } else {
+            el.artistHeroImg.onload = null;
+            el.artistHeroImg.onerror = null;
+            el.artistHeroImg.removeAttribute('src');
+            el.artistHeroImg.style.opacity = '0';
+            el.artistHeroImg.style.display = 'none';
+          }
         } else {
           el.artistHeroImg.onload = null;
           el.artistHeroImg.onerror = null;
@@ -19809,6 +19839,27 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
   window.removeTrackFromQueue = removeTrackFromQueue;
 
   function renderQueueView() {
+    // Deduplicate queue by canonical id (keep first occurrence)
+    if (Array.isArray(state.queue) && state.queue.length > 1) {
+      const seen = new Set();
+      const deduped = [];
+      let newIdx = -1;
+      for (let i = 0; i < state.queue.length; i++) {
+        const t = state.queue[i];
+        const cid = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(t) : '') || (t && t.id ? String(t.id) : '');
+        const key = (t && t.artist && t.title && typeof getTrackNormalizedKey === 'function') ? getTrackNormalizedKey(t.artist, t.title) : (t && t.title ? String(t.title).toLowerCase().trim() : '');
+        const sig = cid || key;
+        if (sig && seen.has(sig)) continue;
+        if (sig) seen.add(sig);
+        if (i === state.queueIndex) newIdx = deduped.length;
+        deduped.push(t);
+      }
+      if (deduped.length < state.queue.length) {
+        state.queue = deduped;
+        state.queueIndex = newIdx >= 0 ? newIdx : (state.queue.length > 0 ? 0 : -1);
+        updateQueueBadge();
+      }
+    }
     updateQueueBadge();
     if (!el.queueTracksList) return;
     renderTracks(el.queueTracksList, state.queue, 'queue');
@@ -20244,6 +20295,244 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
       showToast(`Added ${items.length} tracks`);
     } catch (e) {
       console.warn('Import audio files error:', e);
+    }
+  }
+
+  // Import your music: any file format. Audio is copied/probed like the
+  // normal importer; everything else is transcoded to mp3 by ffmpeg first.
+  // ===== I'm Feeling Lucky today =====
+  async function feelingLuckyToday() {
+    const anchor = state.currentTrack ? {
+      id: state.currentTrack.id,
+      title: state.currentTrack.title,
+      artist: state.currentTrack.artist,
+      thumbnail: state.currentTrack.thumbnail || state.currentTrack.cover || '',
+      duration: state.currentTrack.duration,
+      url: state.currentTrack.url,
+      platform: state.currentTrack.platform || state.platform
+    } : null;
+    const body = {
+      platform: state.platform || 'ytmusic',
+      limit: 14,
+      mode: 'radio',
+      anchor,
+      seeds: anchor ? [anchor] : [],
+      history: (typeof safeJson === 'function' ? safeJson('devsize_history', []) : []).slice(-30),
+      favorites: (typeof safeJson === 'function' ? safeJson('devsize_favorites', []) : []).slice(-40),
+      avoid: { ids: [], keys: [], artists: [] },
+      clientProfile: null
+    };
+    try {
+      const port = (typeof state.serverPort === 'number' && state.serverPort) ? state.serverPort : 38472;
+      const resp = await fetch(`http://127.0.0.1:${port}/api/vibe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await resp.json();
+      if (!data || !data.success || !Array.isArray(data.tracks) || data.tracks.length === 0) {
+        showToast('The vibe engine is too quiet right now. Try again in a few seconds.', 'error');
+        return;
+      }
+      const pool = data.tracks;
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      if (pick && typeof playTrack === 'function') {
+        showToast('Feeling lucky: ' + (pick.title || 'track') + ' - ' + (pick.artist || 'unknown'), 'info');
+        playTrack(pick, pool, Math.max(0, pool.indexOf(pick)));
+      }
+    } catch (e) {
+      console.warn('lucky:', e);
+      showToast('Could not reach the vibe engine', 'error');
+    }
+  }
+  window.feelingLuckyToday = feelingLuckyToday;
+  try {
+    const lcBtn = document.getElementById('btn-lucky-day');
+    if (lcBtn) lcBtn.addEventListener('click', feelingLuckyToday);
+  } catch (_) {}
+
+  // ===== Headset disconnect pause =====
+  // Pause automatically when the default audio output (typically a headset)
+  // disappears from the device list. Enabled by default, disable with the
+  // riff_pause_on_headset_disconnect setting.
+  (function initHeadsetPause() {
+    try {
+      const enabled = (k) => {
+        try { return (localStorage.getItem(k) || '1') !== '0'; } catch (_) { return true; }
+      };
+      if (!navigator.mediaDevices || !enabled('riff_pause_on_headset_disconnect')) return;
+      let baselineOutputs = null;
+      const countOutputs = () => navigator.mediaDevices.enumerateDevices().then(list => {
+        const n = (list || []).filter(d => d && d.kind === 'audiooutput').length;
+        return n;
+      }).catch(() => null);
+      countOutputs().then(n => { if (typeof n === 'number') baselineOutputs = n; });
+      navigator.mediaDevices.addEventListener('devicechange', () => {
+        countOutputs().then(n => {
+          if (typeof n !== 'number' || typeof baselineOutputs !== 'number') return;
+          const dropped = n < baselineOutputs;
+          if (dropped && state.isPlaying) {
+            try {
+              if (typeof togglePlayPause === 'function') {
+                togglePlayPause();
+                showToast('Headset disconnected', 'info');
+              }
+            } catch (_) {}
+          }
+          baselineOutputs = n;
+        });
+      });
+    } catch (_) {}
+  })();
+
+  // ===== Idle memory trim =====
+  // Defer non-critical work to browser idle time, then hand the pages back to
+  // Windows while nothing is playing. Re-armed when playback starts.
+  (function initIdleMemoryTrim() {
+    try {
+      if (!window.electronAPI || !window.electronAPI.trimMemory) return;
+      let trimArmed = false;
+      let trimPending = false;
+      const idle = (cb) => (window.requestIdleCallback || ((f) => setTimeout(f, 1200)))(cb, { timeout: 4000 });
+      const scheduleTrim = () => {
+        if (trimArmed || trimPending || state.isPlaying) return;
+        trimArmed = true;
+        idle(async () => {
+          trimArmed = false;
+          if (state.isPlaying || trimPending) return;
+          trimPending = true;
+          try { await window.electronAPI.trimMemory(); } catch (_) {}
+          trimPending = false;
+        });
+      };
+      ['pointerdown', 'keydown', 'wheel'].forEach(t =>
+        window.addEventListener(t, () => { if (trimArmed) { trimArmed = false; } }, { passive: true }));
+      setInterval(scheduleTrim, 12000);
+      setTimeout(scheduleTrim, 4000);
+    } catch (_) {}
+  })();
+
+  // Pause CSS animations and heavy loops when the window is hidden or blurred
+  // to keep idle CPU near zero. Restored when the window is visible again.
+  try {
+    const syncPause = () => {
+      const paused = document.hidden || !document.hasFocus();
+      window.riffPaused = paused;
+      document.body.classList.toggle('riff-paused', paused);
+      if (paused) {
+        if (typeof animationFrameId === 'number' && animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+          animationFrameId = 0;
+        }
+        if (typeof cacheRafId === 'number' && cacheRafId) {
+          cancelAnimationFrame(cacheRafId);
+          cacheRafId = 0;
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', syncPause);
+    window.addEventListener('blur', syncPause);
+    window.addEventListener('focus', syncPause);
+    syncPause();
+  } catch (_) {}
+
+  // ===== Gapless (armed early handoff) =====
+  // If gapless mode is on (default), the next track is warmed from the local
+  // cache/library and handed over 250 ms before the current one ends, so no
+  // silence is audible between tracks.
+  (function initGapless() {
+    function gaplessEnabled() {
+      try { return (localStorage.getItem('riff_gapless') || '1') !== '0'; } catch (_) { return true; }
+    }
+    try {
+      const a = el.nativeAudio;
+      if (!a) return;
+      let armed = false;
+      a.addEventListener('timeupdate', () => {
+        if (armed) return;
+        if (!gaplessEnabled()) return;
+        if (state.isRepeat) return;
+        if (state.sleepTimer && state.sleepTimer.mode === 'end') return;
+        if (state.isLoadingTrack) return;
+        const d = Number(a.duration);
+        if (!Number.isFinite(d) || d <= 0) return;
+        const remaining = d - (a.currentTime || 0);
+        if (remaining > 0.25 || remaining < 0) return;
+        try {
+          const idx = (state.queueIndex || 0) + 1;
+          const nextTrack = Array.isArray(state.queue) ? state.queue[idx] : null;
+          if (!nextTrack || !nextTrack.id) return;
+          const id = String(nextTrack.id);
+          const isCached = (typeof cachedTrackIds !== 'undefined' && cachedTrackIds && cachedTrackIds.has(id));
+          const isLocalTrack = nextTrack.platform === 'local' || String(nextTrack.id).startsWith('local_');
+          if (!isCached && !isLocalTrack) return;
+          armed = true;
+          if (typeof playTrack === 'function') playTrack(nextTrack, state.queue, idx);
+        } catch (e) { console.warn('gapless:', e); }
+      });
+      a.addEventListener('play', () => { armed = false; });
+    } catch (_) {}
+  })();
+
+  async function importUniversalMusic() {
+    if (!window.electronAPI || !window.electronAPI.importUniversalFiles) return;
+    try {
+      showToast('Importing... this may take a moment for video files');
+      const items = await window.electronAPI.importUniversalFiles();
+      if (!items || items.length === 0) {
+        showToast('Nothing imported (every file failed or had no audio)', 'error');
+        return;
+      }
+
+      await fetch(`http://127.0.0.1:${state.serverPort}/api/library-add`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items })
+      });
+
+      if (state.currentView === 'local') renderLocalView(true);
+
+      let idx = 0;
+      async function worker() {
+        while (idx < items.length) {
+          const item = items[idx++];
+          if (!item || !item.id) continue;
+          await new Promise(resolve => {
+            const url = `http://127.0.0.1:${state.serverPort}/api/library-file?id=${encodeURIComponent(item.id)}`;
+            const a = new Audio(url);
+            a.preload = 'metadata';
+            let done = false;
+            const finish = () => {
+              if (done) return;
+              done = true;
+              a.src = '';
+              resolve();
+            };
+            a.onloadedmetadata = async () => {
+              const dur = Math.round(a.duration || 0);
+              if (dur > 0) {
+                try {
+                  await fetch(`http://127.0.0.1:${state.serverPort}/api/library-update`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: item.id, duration: dur })
+                  });
+                } catch (e) {}
+              }
+              finish();
+            };
+            a.onerror = () => finish();
+            setTimeout(finish, 5000);
+          });
+        }
+      }
+      await Promise.all([worker(), worker()]);
+
+      await renderLocalView(true);
+      showToast(`Imported ${items.length} tracks`);
+    } catch (e) {
+      console.warn('Import universal files error:', e);
+      showToast('Import failed', 'error');
     }
   }
 
@@ -26465,7 +26754,7 @@ function bindCoverHoldZoom(wrapEl) {
   }
   ensureTopMomentIconSettingsDOM();
 
-  const RIFF_FLAME_SVG = `<svg width="20" height="20" viewBox="0 0 578 555" fill="currentColor"><path d="M332.338 31.9017C334.813 39.2389 337.301 46.5688 339.804 53.8913C346.65 74.7 370.849 90.8234 396.492 87.0252C397.785 86.8495 399.062 86.6326 400.348 86.3669C407.957 85.0247 415.561 83.6672 423.159 82.2944C446.596 79.1556 458.061 105.307 448.77 115.743C445.608 122.77 442.461 129.801 439.329 136.837C425.596 169.679 439.612 213.232 473.471 232.344C479.933 236.517 486.403 240.676 492.88 244.821C493.981 246.285 493.745 247.328 493.407 248.135C493.042 248.937 492.491 249.732 491.79 250.256C491.097 250.786 490.251 250.806 489.832 250.206C489.368 249.625 489.511 248.678 489.049 248.256C481.978 251.246 474.914 254.251 467.857 257.27C427.262 275.506 403.732 326.149 417.443 370.677C419.338 378.109 421.248 385.536 423.174 392.958C418.802 386.635 425.155 374.669 436.447 376.689C429.244 374.079 422.036 371.485 414.823 368.906C368.003 352.219 310.867 374.802 288.051 419.957C284.394 426.685 280.751 433.42 277.123 440.163C282.498 427.757 301.968 426.996 308.336 439.757C308.336 439.757 308.336 439.757 308.336 439.757C304.83 432.951 301.309 426.153 297.775 419.362C275.052 373.492 217.164 349.9 169.104 366.585C161.85 369.032 154.599 371.495 147.354 373.973C160.424 370.504 170.82 384.361 165.902 394.368C167.959 386.988 170 379.603 172.026 372.213C186.877 325.566 162.701 271.68 119.642 251.779C112.648 248.638 105.647 245.511 98.6387 242.398C99.2388 243.192 100.509 244.921 100.85 246.556C101.243 248.208 100.902 249.457 100.357 250.256C99.8042 251.06 99.0443 251.698 98.0336 252.245C97.0607 252.787 95.7172 252.948 95.6208 252.256C102.161 248.234 108.693 244.197 115.219 240.147C152.971 219.557 169.652 171.256 154.784 133.816C151.783 126.738 148.768 119.664 145.737 112.596C139.892 109.4 143.532 93.2263 157.822 93.8212C165.379 95.3252 172.941 96.8139 180.508 98.2873C212.832 106.511 246.635 87.7132 257.002 60.1443C259.628 52.8848 262.239 45.618 264.836 38.3439C265.907 34.755 267.541 31.3478 269.8 28.2566C281.165 10.8288 315.802 7.71853 332.338 31.9017C324.701 4.06166 282.506 -11.8981 253.405 10.8113C248.12 14.7998 243.498 19.8304 239.828 25.4595C235.412 31.7968 231.011 38.1413 226.624 44.4932C218.162 55.1648 203.715 56.3531 195.686 50.8503C188.669 47.6576 181.647 44.4803 174.621 41.3182C123.684 17.2019 54.695 73.6585 73.5607 135.689C75.1959 143.204 76.8463 150.714 78.512 158.219C77.37 161.133 74.0651 161.082 73.5772 159.321C66.491 162.283 59.4122 165.259 52.3408 168.25C-14.0469 195.146 -19.7011 303.849 49.3229 338.12C55.9259 342.02 62.5362 345.905 69.1539 349.776C64.3356 348.704 60.1451 343.068 61.2695 336.775C58.6296 343.969 56.005 351.167 53.3956 358.37C23.7661 433.604 106.793 520.091 185.089 491.911C192.427 489.723 199.761 487.52 207.089 485.301C199.383 488.26 189.745 484.654 185.852 477.024C189.329 483.845 192.821 490.658 196.328 497.463C196.328 497.463 196.328 497.463 196.328 497.463C231.344 573.82 353.53 573.059 387.554 497.057C390.937 490.188 394.307 483.312 397.662 476.429C393.676 483.344 384.79 485.94 378.324 482.979C385.694 485.067 393.069 487.139 400.45 489.195C476.968 515.926 555.951 431.33 526.869 359.78C524.128 352.619 521.372 345.462 518.601 338.311C518.586 342.485 515.041 344.878 512.687 344.286C519.242 340.292 525.789 336.284 532.329 332.262C596.434 299.449 589.257 199.138 528.498 175.685C521.364 172.817 514.222 169.963 507.073 167.124C502.691 167.407 496.722 162.71 496.715 155.198C498.249 147.651 499.769 140.099 501.273 132.542C516.692 77.7514 455.527 31.2727 413.737 52.845C406.753 56.1383 399.773 59.4468 392.798 62.7706C392.128 63.1309 391.451 63.4673 390.753 63.7835C377.264 70.2884 357.02 66.2197 345.909 50.7461C341.4 44.4573 336.876 38.1758 332.338 31.9017ZM332.338 31.9017" fill="currentColor"/></svg>`;
+  const RIFF_FLAME_SVG = '<img src="assets/emblem.svg" alt="Riff Rust" width="20" height="20" draggable="false" style="display:block;width:20px;height:20px;pointer-events:none">';
   const DEFAULT_HOME_SVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M4,19V10Q4,9.52 4.21,9.1Q4.43,8.67 4.8,8.4l6-4.5Q11.33,3.5 12,3.5t1.2,0.4l6,4.5q0.38,0.28 0.59,0.7Q20,9.52 20,10v9q0,0.82-0.59,1.41T18,21H15q-0.42,0-0.71-0.29Q14,20.43 14,20V15q0-0.43-0.29-0.71T13,14H11q-0.42,0-0.71,0.29T10,15v5q0,0.43-0.29,0.71T9,21H6q-0.82,0-1.41-0.59T4,19Z"/></svg>`;
 
   function applyHomeButtonIcon() {
@@ -28655,14 +28944,30 @@ function bindCoverHoldZoom(wrapEl) {
     };
     img.src = imgSrc;
   }
+  const ICON_FALLBACK = '01-default.svg';
   function applyHomeAppIcon(val) {
     const chosen = val || localStorage.getItem('riff_app_icon') || '02-editor.svg';
     localStorage.setItem('riff_app_icon', chosen);
     const resolved = resolveAppIconSrc(chosen);
-    const homeImg = document.getElementById('nav-home-app-icon');
-    if (homeImg) homeImg.src = resolved;
-    const settingHomeImg = document.getElementById('setting-home-app-icon');
-    if (settingHomeImg) settingHomeImg.src = resolved;
+    const setIconWithFallback = (img) => {
+      if (!img) return;
+      let usedFallback = false;
+      img.onerror = () => {
+        if (usedFallback) return;
+        usedFallback = true;
+        if (localStorage.getItem('riff_app_icon') === chosen) {
+          localStorage.setItem('riff_app_icon', ICON_FALLBACK);
+        }
+        img.src = resolveAppIconSrc(ICON_FALLBACK);
+        const grid = document.getElementById('app-icon-picker-grid');
+        if (grid) grid.querySelectorAll('.app-icon-option').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.icon === ICON_FALLBACK);
+        });
+      };
+      img.src = resolved;
+    };
+    setIconWithFallback(document.getElementById('nav-home-app-icon'));
+    setIconWithFallback(document.getElementById('setting-home-app-icon'));
     let linkIcon = document.querySelector('link[rel="icon"]');
     if (!linkIcon) {
       linkIcon = document.createElement('link');
@@ -30837,29 +31142,55 @@ function bindCoverHoldZoom(wrapEl) {
   }
   if (window.electronAPI && window.electronAPI.onWelcomeResult) window.electronAPI.onWelcomeResult((d) => applyWelcomeResult(d));
 
+  let compactResizeTimer = null;
   function checkCompactLayout() {
-    const isMini = window.innerWidth <= 520;
-    document.body.classList.toggle('mini', isMini);
-    const savedLyricsOn = localStorage.getItem('riff_mini_lyrics') === '1';
-    document.body.classList.toggle('mini-lyrics-on', isMini && savedLyricsOn);
-    const btn = document.getElementById('btn-mini-lyrics');
-    if (btn) btn.classList.toggle('active', isMini && savedLyricsOn);
-    if (isMini && savedLyricsOn) {
-      renderMiniLyrics();
-      if (el.nativeAudio) updateMiniLyricsHighlight(el.nativeAudio.currentTime || 0);
-    }
+    if (compactResizeTimer) clearTimeout(compactResizeTimer);
+    compactResizeTimer = setTimeout(() => {
+      compactResizeTimer = null;
+      const isMini = window.innerWidth <= 520;
+      const alreadyMini = document.body.classList.contains('mini');
+      if (isMini === alreadyMini) return;
+      document.body.classList.toggle('mini', isMini);
+      const savedLyricsOn = localStorage.getItem('riff_mini_lyrics') === '1';
+      document.body.classList.toggle('mini-lyrics-on', isMini && savedLyricsOn);
+      const btn = document.getElementById('btn-mini-lyrics');
+      if (btn) btn.classList.toggle('active', isMini && savedLyricsOn);
+      if (isMini && savedLyricsOn) {
+        try { renderMiniLyrics(); } catch (_) {}
+        if (el.nativeAudio) updateMiniLyricsHighlight(el.nativeAudio.currentTime || 0);
+      }
+    }, 120);
   }
   window.addEventListener('resize', checkCompactLayout);
   checkCompactLayout();
 
   async function toggleMiniWindow() {
     if (window.electronAPI && window.electronAPI.toggleMiniWindow) {
-      const isNowMini = await window.electronAPI.toggleMiniWindow();
-      if (isNowMini) {
-        const savedLyricsOn = localStorage.getItem('riff_mini_lyrics') === '1';
-        if (savedLyricsOn && window.electronAPI.setMiniLyrics) {
-          await window.electronAPI.setMiniLyrics(true);
+      let isNowMini = null;
+      try {
+        isNowMini = await window.electronAPI.toggleMiniWindow();
+      } catch (e) {
+        console.warn('toggleMiniWindow invoke failed:', e);
+        isNowMini = null;
+      }
+      if (typeof isNowMini === 'boolean') {
+        const miniDot = isNowMini !== document.body.classList.contains('mini');
+        if (miniDot) {
+          // Native side flipped but the window may be mid-transition; force-arm
+          // the compact layout locally so the button never feels dead.
+          document.body.classList.toggle('mini', isNowMini);
+          const savedLyricsOn = localStorage.getItem('riff_mini_lyrics') === '1';
+          document.body.classList.toggle('mini-lyrics-on', isNowMini && savedLyricsOn);
         }
+        if (isNowMini) {
+          const savedLyricsOn = localStorage.getItem('riff_mini_lyrics') === '1';
+          if (savedLyricsOn && window.electronAPI.setMiniLyrics) {
+            await window.electronAPI.setMiniLyrics(true);
+          }
+        }
+        try { if (window.electronAPI.logError) window.electronAPI.logError('INFO', `mini player ${isNowMini ? 'on' : 'off'} (native=${isNowMini})`); } catch (_) {}
+      } else {
+        console.warn('toggleMiniWindow: no boolean returned from native side');
       }
     }
   }
@@ -31656,8 +31987,8 @@ function bindCoverHoldZoom(wrapEl) {
   (function initUpdateUI() {
     const api = window.electronAPI;
     const $ = (id) => document.getElementById(id);
-    let currentAppVersion = '0.1.19';
-    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.19' : v;
+    let currentAppVersion = '0.1.20';
+    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.20' : v;
     if (api && api.getAppVersion) {
       api.getAppVersion().then((v) => {
         if (v) {
@@ -31740,7 +32071,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.1.19';
+      if (verEl) verEl.textContent = displayVer || 'v0.1.20';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -35110,7 +35441,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.1.19';
+    let appVer = '0.1.20';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();
@@ -42859,6 +43190,39 @@ function bindCoverHoldZoom(wrapEl) {
       });
     }
 
+    // Drag-to-scroll the collapsed library header (hold click / swipe)
+    (function initHeaderDragScroll() {
+      const header = document.querySelector('.sb-your-lib-header');
+      if (!header) return;
+      let isDown = false, startX = 0, scrollLeft = 0, lastScrollLeft = 0;
+      const onStart = (e) => {
+        isDown = true;
+        header.classList.add('is-dragging');
+        startX = e.pageX || (e.touches && e.touches[0] && e.touches[0].pageX);
+        scrollLeft = header.scrollLeft;
+        lastScrollLeft = scrollLeft;
+        header.style.scrollBehavior = 'auto';
+      };
+      const onMove = (e) => {
+        if (!isDown) return;
+        const x = e.pageX || (e.touches && e.touches[0] && e.touches[0].pageX);
+        const walk = (x - startX) * 1.6;
+        header.scrollLeft = scrollLeft - walk;
+      };
+      const onEnd = () => {
+        isDown = false;
+        header.classList.remove('is-dragging');
+        header.style.scrollBehavior = 'smooth';
+      };
+      header.addEventListener('pointerdown', onStart, { passive: true });
+      header.addEventListener('pointermove', onMove);
+      header.addEventListener('pointerup', onEnd);
+      header.addEventListener('pointerleave', onEnd);
+      header.addEventListener('touchstart', (e) => onStart(e), { passive: true });
+      header.addEventListener('touchmove', (e) => onMove(e), { passive: false });
+      header.addEventListener('touchend', onEnd, { passive: true });
+    })();
+
     let btnRailExpandLib = document.getElementById('btn-rail-expand-lib');
     if (!btnRailExpandLib) {
       const railActionGroup = document.querySelector('.rail-action-group');
@@ -42905,6 +43269,13 @@ function bindCoverHoldZoom(wrapEl) {
                 setCpmTab('new', false);
                 openModal(cpm);
               }
+            }
+          },
+          {
+            label: 'Import your music',
+            icon: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/><path d="M16 6l-4.2 3.4L7 6.9"/></svg>',
+            action: () => {
+              importUniversalMusic();
             }
           },
           {

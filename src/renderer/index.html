@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Text:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=0.1.19">
+  <link rel="stylesheet" href="styles.css?v=0.1.20">
   <script>if (/Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '')) document.documentElement.classList.add('platform-darwin');</script>
   <style id="tg-account-critical-css">
   #settings-nav-account.settings-account-nav-btn {
@@ -85,8 +85,8 @@
     height: 22px !important;
     display: block !important;
     background-color: rgba(0, 0, 0, 0.24) !important;
-    -webkit-mask: url('../../assets/riff.svg') no-repeat center / contain !important;
-    mask: url('../../assets/riff.svg') no-repeat center / contain !important;
+    -webkit-mask: url('../../assets/emblem.svg') no-repeat center / contain !important;
+    mask: url('../../assets/emblem.svg') no-repeat center / contain !important;
     pointer-events: none !important;
   }
   .tg-pat-icon.p1  { top: 10%; left: 21%; transform: rotate(-14deg) scale(0.95); opacity: 0.72; }
@@ -256,8 +256,8 @@
     height: 100% !important;
     display: block !important;
     background-color: #ffffff !important;
-    -webkit-mask: url('../../assets/riff.svg') no-repeat center / contain !important;
-    mask: url('../../assets/riff.svg') no-repeat center / contain !important;
+    -webkit-mask: url('../../assets/emblem.svg') no-repeat center / contain !important;
+    mask: url('../../assets/emblem.svg') no-repeat center / contain !important;
   }
   .acc-satellite-btn {
     position: absolute !important;
@@ -437,7 +437,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
 
         <button class="nav-item active" data-view="discover" id="nav-discover" title="Home">
           <div class="nav-indicator">
-            <img loading="lazy"  id="nav-home-app-icon" class="nav-home-app-icon" src="../../assets/02-editor.svg" alt="Home" draggable="false" />
+            <img loading="lazy"  id="nav-home-app-icon" class="nav-home-app-icon" src="../../assets/riff-emblem.png" alt="Home" draggable="false" />
           </div>
           <div class="sb-home-banner-content">
             <span class="sb-home-banner-title" data-i18n-fixed>Riff Rust</span>
@@ -535,6 +535,10 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
         <div class="sidebar-library-wrap" id="sidebar-library-wrap">
           <div class="sb-your-lib-header">
             <button type="button" class="sb-collapse-btn" id="btn-sb-collapse" title="Collapse Your Library"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><polyline points="14 9 11 12 14 15"/></svg><span data-i18n>Your Library</span></button>
+            <button type="button" class="sb-lucky-pill-btn" id="btn-lucky-day" title="I'm Feeling Lucky today — one grab from music you actually listen to">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 8.8C10.9 6.6 8.6 6 6.7 7 5 7.9 4.8 10.3 6.6 11.9 4.9 12.9 4.6 15.6 6.6 16.9c1.7 1.2 4.3 0.7 5.4-1 1.1 1.7 3.7 2.2 5.4 1 2-1.3 1.7-4-0.1-5 1.8-1.6 1.6-4-0.1-4.9-1.9-1-4.2-.4-5.3 1.8Z"/><path d="M12 12.2c0 2.6.9 4.6 3.3 5.6" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
+              <span data-i18n>Lucky?</span>
+            </button>
             <button type="button" class="sb-create-pill-btn" id="btn-sb-create-pill"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span data-i18n>Create</span></button>
             <div class="sb-create-popover hidden" id="sb-create-popover">
               <button type="button" class="sb-popover-item" id="btn-popover-playlist">
@@ -716,7 +720,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
           <div class="sp-home" id="sp-home"><div class="spotify-promo hidden" id="spotify-promo" hidden>
   <div class="riff-orbit-stage" aria-hidden="true">
     <div class="riff-orbit-path"></div>
-    <img loading="lazy"  class="riff-orbit-center" src="../../assets/riff.svg" width="56" height="56" alt="Riff" draggable="false">
+    <img loading="lazy"  class="riff-orbit-center" src="../../assets/emblem.svg" width="56" height="56" alt="Riff" draggable="false">
     <div class="riff-orbit-ring">
       <div class="riff-orbit-item" style="transform: rotate(0deg) translateY(-70px) rotate(0deg);">
         <img class="riff-orbit-logo" src="https://cdn.simpleicons.org/spotify/1ED760" width="32" height="32" loading="lazy" alt="Spotify" onerror="this.style.display='none'" style="transform: rotate(0deg) translateY(-70px) rotate(0deg);">
@@ -3132,7 +3136,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                   </div>
                   <div style="display: flex; flex-direction: column;">
                     <span class="setting-name">Riff Rust</span>
-                    <span id="about-version" style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Version 0.1.19</span>
+                    <span id="about-version" style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Version 0.1.20</span>
                   </div>
                 </div>
                 <button class="btn-pill-primary" id="btn-check-updates" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Check for updates</button>
@@ -3169,7 +3173,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
               </svg>
               Riff Rust made by ziyyhhk &amp; rootless, support me: <a href="https://discord.gg/PsTXVKeqFZ" target="_blank" rel="noopener" id="settings-discord-link" data-invite="PsTXVKeqFZ" title="Join our Discord">discord.gg/PsTXVKeqFZ</a>
             </span>
-            <span class="settings-version-tag">v0.1.19</span>
+            <span class="settings-version-tag">v0.1.20</span>
           </div>
             </div>
           </div>
@@ -4516,7 +4520,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
     <div class="ota-update-sheet" id="update-sheet-card">
       <div class="ota-update-time" id="update-release-time">Just now</div>
       <div class="ota-update-top-row">
-        <span class="ota-update-version" id="update-version-badge">v0.1.19</span>
+        <span class="ota-update-version" id="update-version-badge">v0.1.20</span>
         <div class="ota-update-actions">
           <button class="ota-btn-update" id="btn-update-now" type="button" data-i18n>Update</button>
           <button class="ota-btn-ignore" id="btn-update-later" type="button" data-i18n>Ignore</button>
@@ -4872,7 +4876,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
   <script src="shapes.js"></script>
   <script src="lyrics-rtl.js"></script>
   <script src="track-sort.js"></script>
-  <script src="electron-shim.js?v=0.1.19"></script>
-<script src="app.js?v=0.1.19"></script>
+  <script src="electron-shim.js?v=0.1.20"></script>
+<script src="app.js?v=0.1.20"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&display=swap');
+﻿@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&display=swap');
 
 @font-face {
   font-family: "VAGRoundedLTCYR-Black";
@@ -249,7 +249,7 @@ button:not(.btn-play-pause):not(.nav-item):not(.settings-nav-btn):active, .chip-
   transition: height 220ms cubic-bezier(0.2, 0, 0, 1), opacity 180ms ease;
 }
 .titlebar .app-logo { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; justify-content: center; pointer-events: auto; cursor: pointer; -webkit-app-region: no-drag; }
-.titlebar-riff-icon { width: 20px; height: 20px; display: block; background-color: var(--md-sys-color-primary); -webkit-mask: url('../../assets/riff.svg') no-repeat center / contain; mask: url('../../assets/riff.svg') no-repeat center / contain; }
+.titlebar-riff-icon { width: 22px; height: 22px; display: block; background: url('../../assets/badge.png') no-repeat center / contain; pointer-events: none; filter: drop-shadow(0 0 3px rgba(200,160,255,.45)); }
 body.hide-titlebar::before {
   content: "";
   position: fixed;
@@ -693,7 +693,7 @@ body.is-window-resizing .platform-switch-container {
   gap: 16px;
   flex-shrink: 0;
   z-index: 20;
-  transition: background-color var(--transition-emphasized);
+  transition: width 240ms cubic-bezier(0.2, 0, 0, 1), background-color var(--transition-emphasized);
 }
 
 .sidebar-nav { position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; flex: 1; min-height: 0; isolation: isolate; }
@@ -859,7 +859,7 @@ body.is-window-resizing .platform-switch-container {
   min-width: 46px !important;
   min-height: 46px !important;
   border-radius: 12px !important;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
   user-select: none;
   pointer-events: none;
@@ -10981,9 +10981,7 @@ body.hide-explicit-badges .explicit-badge {
 .riff-hero-logo-main {
   width: 46px;
   height: 46px;
-  background-color: #36284E;
-  -webkit-mask: url('../../assets/riff.svg') no-repeat center / contain;
-  mask: url('../../assets/riff.svg') no-repeat center / contain;
+  background: url('../../assets/emblem.svg') no-repeat center / contain;
   transform: rotate(-45deg);
 }
 .riff-hero-floats {
@@ -10994,10 +10992,8 @@ body.hide-explicit-badges .explicit-badge {
 }
 .riff-float-logo {
   position: absolute;
-  background-color: #492E7D;
-  -webkit-mask: url('../../assets/riff.svg') no-repeat center / contain;
-  mask: url('../../assets/riff.svg') no-repeat center / contain;
-  opacity: 0.85;
+  background: url('../../assets/emblem.svg') no-repeat center / contain;
+  opacity: 0.9;
 }
 .riff-float-logo.f1 {
   width: 24px;
@@ -12435,16 +12431,19 @@ body:not(.classic-sidebar):not(.mini) .titlebar {
   margin-left: 84px !important;
   width: calc(100% - 84px) !important;
   background: transparent !important;
+  transition: margin-left 240ms cubic-bezier(0.2, 0, 0, 1), width 240ms cubic-bezier(0.2, 0, 0, 1);
 }
 body:not(.classic-sidebar):not(.mini) .top-nav {
   margin-left: 84px !important;
   width: calc(100% - 84px) !important;
   background: transparent !important;
+  transition: margin-left 240ms cubic-bezier(0.2, 0, 0, 1), width 240ms cubic-bezier(0.2, 0, 0, 1);
 }
 body:not(.classic-sidebar):not(.mini) .app-layout {
   margin-left: 84px !important;
   width: calc(100% - 84px) !important;
   gap: 8px !important;
+  transition: margin-left 240ms cubic-bezier(0.2, 0, 0, 1), width 240ms cubic-bezier(0.2, 0, 0, 1);
   padding: 0 10px 0 0 !important;
   margin-bottom: 96px !important;
   height: calc(100vh - 40px - 64px - 96px) !important;
@@ -13295,6 +13294,11 @@ body:not(.sidebar-expanded):not(.mini) .sidebar-nav {
   align-items: center !important;
   gap: 12px !important;
   width: 100% !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+  padding-bottom: 8px !important;
 }
 body:not(.sidebar-expanded):not(.mini) .sidebar-nav #nav-discover {
   width: 48px !important;
@@ -13383,6 +13387,7 @@ body.sidebar-expanded:not(.classic-sidebar):not(.mini) .top-nav,
 body.sidebar-expanded:not(.classic-sidebar):not(.mini) .app-layout {
   margin-left: var(--sidebar-w, 296px) !important;
   width: calc(100% - var(--sidebar-w, 296px)) !important;
+  transition: margin-left 240ms cubic-bezier(0.2, 0, 0, 1), width 240ms cubic-bezier(0.2, 0, 0, 1);
 }
 body.sidebar-expanded:not(.mini) .rail-drawer {
   left: var(--sidebar-w, 288px) !important;
@@ -13449,8 +13454,8 @@ body.sidebar-expanded .sb-home-banner-fx {
   position: absolute;
   display: block;
   background-color: rgba(255, 255, 255, 0.22);
-  -webkit-mask: url('../../assets/riff.svg') no-repeat center / contain;
-  mask: url('../../assets/riff.svg') no-repeat center / contain;
+  -webkit-mask: url('../../assets/emblem.svg') no-repeat center / contain;
+  mask: url('../../assets/emblem.svg') no-repeat center / contain;
   pointer-events: none !important;
   transform: none !important;
   animation: none !important;
@@ -14156,8 +14161,8 @@ body.play-btn-nobg .btn-play-pause .play-spinner {
   width: 22px;
   height: 22px;
   background-color: rgba(0, 0, 0, 0.28);
-  -webkit-mask: url('../../assets/riff.svg') no-repeat center / contain;
-  mask: url('../../assets/riff.svg') no-repeat center / contain;
+  -webkit-mask: url('../../assets/emblem.svg') no-repeat center / contain;
+  mask: url('../../assets/emblem.svg') no-repeat center / contain;
   pointer-events: none;
 }
 .tg-pat-icon.p1  { top: 14%; left: 18%; transform: rotate(-14deg) scale(0.95); opacity: 0.75; }
@@ -14319,8 +14324,8 @@ body.perf .tg-pat-meme.switching {
     height: 22px !important;
     display: block !important;
     background-color: rgba(0, 0, 0, 0.24) !important;
-    -webkit-mask: url('../../assets/riff.svg') no-repeat center / contain !important;
-    mask: url('../../assets/riff.svg') no-repeat center / contain !important;
+    -webkit-mask: url('../../assets/emblem.svg') no-repeat center / contain !important;
+    mask: url('../../assets/emblem.svg') no-repeat center / contain !important;
     pointer-events: none !important;
   }
   .tg-pat-icon.p1  { top: 10%; left: 21%; transform: rotate(-14deg) scale(0.95); opacity: 0.72; }
@@ -14530,8 +14535,8 @@ body.perf .tg-pat-meme.switching {
     height: 100% !important;
     display: block !important;
     background-color: #ffffff !important;
-    -webkit-mask: url('../../assets/riff.svg') no-repeat center / contain !important;
-    mask: url('../../assets/riff.svg') no-repeat center / contain !important;
+    -webkit-mask: url('../../assets/emblem.svg') no-repeat center / contain !important;
+    mask: url('../../assets/emblem.svg') no-repeat center / contain !important;
   }
   .acc-satellite-btn {
     position: absolute !important;
@@ -15223,11 +15228,33 @@ body[data-icon-pack^="material"] svg[stroke="currentColor"] {
 .sb-your-lib-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: 4px 6px 6px 6px;
   gap: 8px;
   position: relative;
   flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.sb-your-lib-header::-webkit-scrollbar { height: 5px; }
+.sb-your-lib-header::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); border-radius: 3px; }
+.sb-your-lib-header::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.22); border-radius: 3px; }
+.sb-your-lib-header::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.35); }
+.sb-your-lib-header .sb-collapse-btn span,
+.sb-your-lib-header .sb-lucky-pill-btn span,
+.sb-your-lib-header .sb-create-pill-btn span {
+  overflow: visible !important;
+  text-overflow: unset !important;
+  white-space: normal !important;
+}
+.sb-your-lib-header .sb-collapse-btn,
+.sb-your-lib-header .sb-lucky-pill-btn,
+.sb-your-lib-header .sb-create-pill-btn {
+  flex: 0 0 auto !important;
+  white-space: normal !important;
 }
 .sb-collapse-btn {
   display: inline-flex;
@@ -16718,7 +16745,21 @@ body.sidebar-expanded .sidebar-nav #nav-discover .nav-home-app-icon {
 }
 .sb-lib-tabs-icons {
   border-radius: 10px !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+.sb-lib-tabs-icons::-webkit-scrollbar { display: none; height: 0; }
+.sb-horiz-tabs {
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.sb-horiz-tabs::-webkit-scrollbar { display: none; height: 0; }
 .sb-lib-icon-tab {
   border-radius: 8px !important;
 }
@@ -16894,6 +16935,9 @@ body.cover-bg-on :is(.sidebar, .playbar, .top-nav, .right-panel) {
 .btn-play-pause:not(.is-loading):not(.buffering) .play-loading-dots i {
   animation-play-state: paused !important;
 }
+body:not(.is-playing) .home-ambient-layer.on { opacity: 0.14 !important; filter: none !important; }
+body:not(.is-playing) .cover-bg-layer.on { opacity: 0.15 !important; filter: blur(6px) saturate(1.1) !important; }
+body:not(.is-playing) .particles-bg-canvas { display: none !important; }
 body:not(.is-playing) #right-panel-title.is-marquee .rp-title-inner {
   animation-play-state: paused !important;
 }
@@ -16921,3 +16965,31 @@ body:is(.has-custom-bg, .has-video-bg, .cover-bg-on) .sidebar {
   backdrop-filter: blur(10px) saturate(140%) !important;
   -webkit-backdrop-filter: blur(10px) saturate(140%) !important;
 }
+
+/* Pause all animations when window is hidden/blurred to save CPU */
+body.riff-paused *,
+body.riff-paused *::before,
+body.riff-paused *::after {
+  animation-play-state: paused !important;
+}
+/* Drop expensive backdrop blur when idle */
+body.riff-paused [style*="backdrop-filter"],
+body.riff-paused .glass-panel,
+body.riff-paused .glass-card {
+  backdrop-filter: blur(4px) !important;
+  -webkit-backdrop-filter: blur(4px) !important;
+}
+
+/* ===== I'm Feeling Lucky pill ===== */
+.sb-lucky-pill-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border: 0; border-radius: 999px;
+  background: linear-gradient(135deg, #3F6B2F, #2C4E21);
+  color: #E7F4DD;
+  font-family: inherit; font-size: calc(12px * var(--font-scale, 1)); font-weight: 600;
+  cursor: pointer; transition: transform .15s ease, filter .15s ease;
+}
+.sb-lucky-pill-btn:hover { transform: translateY(-1px); filter: brightness(1.15); }
+.sb-lucky-pill-btn:active { transform: scale(.97); }
+.sb-lucky-pill-btn svg { display: block; }
+body:not(.sidebar-expanded):not(.mini) .sidebar-nav::-webkit-scrollbar { display: none !important; }

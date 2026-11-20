@@ -155,6 +155,87 @@ pub fn import_audio_files(paths: &[String]) -> Vec<Value> {
     out
 }
 
+/// Import files of ANY format: audio passes through with the usual direct copy
+/// flow, everything else (mp4, mkv, mov, webm, wma, aiff...) is transcoded to
+/// mp3 with ffmpeg first. Returns display-ready items in the same shape as
+/// `import_audio_files`. Files with no audio or that fail ffmpeg are skipped;
+/// nothing is deleted on failure except the partial temp file.
+pub fn import_universal_files(paths: &[String]) -> Vec<Value> {
+    const UNIVERSAL_EXT: [&str; 34] = [
+        "mp3", "wav", "flac", "opus", "ogg", "oga", "m4a", "aac", "webm", "weba",
+        "wma", "aiff", "aif", "alac", "ape", "wv", "mp2", "mpc", "amr", "3gp",
+        "mp4", "mkv", "mov", "avi", "wmv", "flv", "ts", "mpg", "mpeg", "mka",
+        "ra", "rm", "mid", "midi",
+    ];
+    let ffmpeg = util::resolve_binary("ffmpeg");
+    let tmp_root = util::data_dir().join("import-tmp");
+    let _ = fs::create_dir_all(util::library_dir());
+    let mut out = Vec::new();
+
+    for p in paths {
+        let path = PathBuf::from(p);
+        if !path.is_file() {
+            continue;
+        }
+        let stem = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "track".into());
+        let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+
+        let working: PathBuf;
+        let working_is_tmp: bool;
+        if UNIVERSAL_EXT.contains(&ext.as_str()) && AUDIO_EXT.contains(&ext.as_str()) {
+            // Already a natively playable audio file: same direct flow as import_audio_files.
+            working = path.clone();
+            working_is_tmp = false;
+        } else if let Some(ff) = &ffmpeg {
+            // Transcode anything else (video containers, exotic audio codecs) into mp3.
+            let _ = fs::create_dir_all(&tmp_root);
+            let dest = tmp_root.join(format!("{}.{}.mp3", &stem, crate::util::sha1_hex(p.as_bytes())[..8].to_string()));
+            let result = std::process::Command::new(ff)
+                .arg("-y").arg("-hide_banner").arg("-loglevel").arg("error")
+                .arg("-i").arg(&path)
+                .arg("-map_metadata").arg("0")
+                .arg("-vn")
+                .arg("-codec:a").arg("libmp3lame")
+                .arg("-q:a").arg("2")
+                .arg(&dest)
+                .output();
+            match result {
+                Ok(o) if o.status.success() && dest.is_file() => {
+                    working = dest;
+                    working_is_tmp = true;
+                }
+                _ => {
+                    let _ = fs::remove_file(&dest);
+                    continue; // no audio stream or ffmpeg failed
+                }
+            }
+        } else {
+            continue; // ffmpeg missing and format not natively playable
+        }
+
+        let meta = match fs::metadata(&working) {
+            Ok(m) => m,
+            Err(_) => {
+                if working_is_tmp { let _ = fs::remove_file(&working); }
+                continue;
+            }
+        };
+        let out_ext = if working_is_tmp { "mp3" } else { ext.as_str() };
+        let hash = util::sha1_hex(format!("{}{}", stem, meta.len()).as_bytes());
+        let id = format!("local_{}", &hash[..12]);
+        let file = format!("{id}.{out_ext}");
+        let dest = util::library_dir().join(&file);
+        if !dest.exists() && fs::copy(&working, &dest).is_err() {
+            if working_is_tmp { let _ = fs::remove_file(&working); }
+            continue;
+        }
+        if working_is_tmp { let _ = fs::remove_file(&working); }
+        let name = path.file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "Unknown".into());
+        out.push(json!({ "id": id, "file": file, "ext": out_ext, "name": name }));
+    }
+    out
+}
+
 /// Read title/artist/album/duration and cover bytes using lofty.
 pub fn read_tags(path: &PathBuf) -> (String, String, String, u64, Option<Vec<u8>>) {
     use lofty::prelude::*;

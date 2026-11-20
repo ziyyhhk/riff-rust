@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+﻿#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
 mod discord_rpc;
@@ -262,7 +262,7 @@ mod win_workingset {
 /// Empty the working set of this process and every child process. Never
 /// called while the window is visible — see the call sites.
 #[cfg(windows)]
-fn trim_working_sets() {
+pub(crate) fn trim_working_sets() {
     use std::collections::HashSet;
 
     unsafe {
@@ -323,7 +323,7 @@ fn trim_working_sets() {
 }
 
 #[cfg(not(windows))]
-fn trim_working_sets() {}
+pub(crate) fn trim_working_sets() {}
 
 fn main() {
     util::ensure_dirs();
@@ -393,7 +393,9 @@ fn main() {
             commands::restart_app,
             commands::set_app_proxy,
             commands::get_gpu_compositing,
+            commands::trim_memory,
             commands::import_audio_files,
+            commands::import_universal_files,
             commands::rescan_local_metadata,
             commands::discord_rpc_update,
             commands::discord_rpc_clear,

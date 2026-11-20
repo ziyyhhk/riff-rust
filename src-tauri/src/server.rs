@@ -187,6 +187,49 @@ fn unported_list() -> Response {
     json_ok(json!({ "success": false, "error": NOT_PORTED, "tracks": [], "results": [] }))
 }
 
+async fn album_tracks(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let id = qp(&q, "id");
+    let dz_id = id.strip_prefix("dz-").unwrap_or("");
+    if dz_id.is_empty() {
+        return json_ok(json!({ "success": false, "error": NOT_PORTED, "tracks": [] }));
+    }
+    let cache_key = format!("disc:album-tracks:dz:{dz_id}");
+    if let Some(cached) = state::cache_get(&state.stream_cache, &cache_key, Duration::from_secs(24 * 60 * 60)) {
+        return json_ok(json!({ "success": true, "tracks": cached, "album": null }));
+    }
+    let url = format!("https://api.deezer.com/album/{dz_id}/tracks?limit=100");
+    let resp = match state.http().get(&url).send().await {
+        Ok(r) => r,
+        Err(_) => return json_err(StatusCode::BAD_GATEWAY, "deezer unavailable"),
+    };
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    let data = body.get("data").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let mut out = Vec::new();
+    for (idx, t) in data.iter().enumerate() {
+        let tid = t.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+        let title = t.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let artist = t.get("artist").and_then(|v| v.get("name")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let duration = t.get("duration").and_then(|v| v.as_u64()).unwrap_or(0);
+        if title.is_empty() {
+            continue;
+        }
+        out.push(json!({
+            "id": format!("dz-{tid}"),
+            "title": title,
+            "artist": artist,
+            "album": title,
+            "duration": duration,
+            "thumbnail": "",
+            "platform": "deezer",
+            "source": "deezer",
+            "isExplicit": false,
+            "no": idx + 1,
+        }));
+    }
+    state::cache_put(&state.stream_cache, cache_key, json!(out), 4, Duration::from_secs(24 * 60 * 60));
+    json_ok(json!({ "success": !out.is_empty(), "tracks": out, "album": null }))
+}
+
 /// Shared, pooled HTTP client honouring the configured proxy.
 fn http_client(state: &AppState) -> reqwest::Client {
     state.http()
@@ -1225,12 +1268,21 @@ async fn stream_info(State(state): State<Shared>, Query(q): Query<HashMap<String
             || url_trimmed.contains("youtube.com")
             || url_trimmed.contains("youtu.be");
         let url_video_id = extract_video_id(url_trimmed);
-        let id_is_video = is_video_id(&id);
+        let id_is_video = is_video_id(&id) && !id.starts_with("dz-");
 
         if target_is_youtube && !id_is_video {
             if let Some(vid) = url_video_id {
                 id = vid;
             } else if let Some(vid) = youtube_search_fallback(&state, &q, &title, &artist).await {
+                util::log_line(
+                    "INFO",
+                    &format!("stream-info: search resolved {vid}"),
+                );
+                id = vid;
+            }
+        } else if !id_is_video && id.starts_with("dz-") {
+            // Deezer album tracks are not directly playable; resolve through YouTube search.
+            if let Some(vid) = youtube_search_fallback(&state, &q, &title, &artist).await {
                 util::log_line(
                     "INFO",
                     &format!("stream-info: search resolved {vid}"),
@@ -3332,7 +3384,7 @@ pub fn build_router(state: Shared) -> Router {
         .route("/api/cached", get(cached_status))
         .route("/api/albums/search", get(stub_empty_list))
         .route("/api/playlists/search", get(stub_empty_list))
-        .route("/api/albums/tracks", get(stub_empty_list))
+        .route("/api/albums/tracks", get(album_tracks))
         .route("/api/album", get(stub_empty_list))
         .route("/api/album-tracks", get(stub_empty_list))
         .route("/api/track-cover", get(stub_unported))

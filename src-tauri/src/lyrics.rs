@@ -179,6 +179,20 @@ pub async fn lyrics(state: &Arc<crate::state::AppState>, q: &HashMap<String, Str
         _ => None,
     };
 
+    // If the exact match with duration failed, retry without duration in case
+    // the duration we were given is slightly off (different remaster, etc.).
+    if exact_resp.is_none() && duration.is_some() {
+        let no_dur_url = format!(
+            "{LRCLIB_BASE}/api/get?artist_name={}&track_name={}",
+            util::percent_encode(&artist_q),
+            util::percent_encode(&title_q)
+        );
+        exact_resp = match tokio::time::timeout(timeout, client.get(&no_dur_url).send()).await {
+            Ok(Ok(resp)) if resp.status().is_success() => Some(resp),
+            _ => None,
+        };
+    }
+
     // 2) Fallback /api/search (first non-instrumental, else first)
     if exact_resp.is_none() {
         let search_url = format!(
@@ -188,13 +202,19 @@ pub async fn lyrics(state: &Arc<crate::state::AppState>, q: &HashMap<String, Str
         if let Ok(Ok(resp)) = tokio::time::timeout(timeout, client.get(&search_url).send()).await {
             if resp.status().is_success() {
                 if let Ok(items) = resp.json::<Vec<Value>>().await {
-                    let pick = items
+                    // Sort candidates by score (descending), then try each one
+                    // until we find one with lyrics. The old code picked only the
+                    // top scorer and gave up if that single item had no lyrics.
+                    let mut candidates: Vec<&Value> = items
                         .iter()
                         .filter(|i| i.get("instrumental").and_then(Value::as_bool) != Some(true))
-                        .max_by_key(|i| lrc_match_score(i, &title_q, &artist_q, duration))
-                        .cloned();
-                    if let Some(item) = pick {
-                        if let Some(lyrics) = item_lrc(&item) {
+                        .collect();
+                    candidates.sort_by(|a, b| {
+                        lrc_match_score(b, &title_q, &artist_q, duration)
+                            .cmp(&lrc_match_score(a, &title_q, &artist_q, duration))
+                    });
+                    for item in candidates {
+                        if let Some(lyrics) = item_lrc(item) {
                             let adjusted = adjust_and_tag(&lyrics);
                             cache_put(
                                 &state.lyrics_cache,
@@ -205,7 +225,7 @@ pub async fn lyrics(state: &Arc<crate::state::AppState>, q: &HashMap<String, Str
                             );
                             return lyrics_payload(LrcHit {
                                 lyrics: adjusted,
-                                is_explicit: item_is_explicit(&item),
+                                is_explicit: item_is_explicit(item),
                                 source: "lrclib",
                             });
                         }
@@ -291,7 +311,7 @@ fn lrc_match_score(item: &Value, title: &str, artist: &str, duration: Option<f64
         (duration, item.get("duration").and_then(Value::as_f64))
     {
         if (item_dur - want_dur).abs() > 20.0 {
-            score -= 8;
+            score -= 4;
         }
     }
     score
