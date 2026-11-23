@@ -1,5 +1,5 @@
 ﻿<p align="center">
-  <img src="readme-hero.png?v=3" alt="Riff Rust, a desktop music player and audio suite for YouTube Music, SoundCloud, and local files" width="100%">
+  <img src="docs/img/readme-hero.png?v=4" alt="Riff Rust, a desktop music player and audio suite for YouTube Music, SoundCloud, and local files" width="100%">
 </p>
 
 <p align="center">
@@ -7,12 +7,12 @@
 </p>
 
 <h1 align="center">
-  <img src="github/readme/emoj2i.gif" width="48" height="48" align="absmiddle" alt="emoji">&nbsp;Riff Rust
+  <img src="docs/img/emoj2i.gif" width="48" height="48" align="absmiddle" alt="emoji">&nbsp;Riff Rust
 </h1>
 
 > **Riff Rust** is a from scratch [Rust + Tauri](https://tauri.app) rebuild of [Riff](https://github.com/rootscripts/riff) (Electron + vanilla JavaScript, MIT).
 > Same UI, rebuilt backend: a native WebView instead of bundled Chromium, and a Rust HTTP API on localhost instead of a Node server, aiming for far lower RAM and CPU use.
-> It is **not** affiliated with the upstream Riff team; it is a community rebuild. Feature parity is a work in progress, see [PORTING.md](PORTING.md) for the exact status of every feature.
+> It is **not** affiliated with the upstream Riff team; it is a community rebuild. Feature parity is a work in progress, see [PORTING.md](docs/PORTING.md) for the exact status of every feature.
 > Original Riff copyright belongs to its authors; this fork remains MIT licensed (see [LICENSE](LICENSE)).
 
 <p align="center">
@@ -158,7 +158,7 @@ The exact bundle produced depends on the host platform; on Windows the output is
 
 ## Memory usage
 
-Riff Rust embeds WebView2, i.e. Chromium with extra steps. The old Electron Riff typically used ~180 MB steady state; Riff Rust ships no bundled Chromium but pays for the OS WebView2 process group (browser + renderer + GPU + audio service), so the floor is the browser, not this app's code. Measured whole process tree (`riff-rust.exe` plus every `msedgewebview2.exe` child) idling at the home screen on this machine: 0.1.17 ≈ 96 MB, 0.1.18 ≈ 99–115 MB, 0.1.19 reads about 171 to 278 MB across visible window runs (depends on what the home feed fetched) and 214 MB for 0.1.18 measured the same way; minimized to tray it trims down to roughly 145 to 150 MB. Anyone claiming "under 40 MB" for a WebView2 app is measuring the wrong thing. The real wins are startup time, installer size, and background CPU (decorations and visualizers now throttle hard when the window is hidden or in the tray). No side by side numbers against upstream on the same playback scenario have been published yet; run `npm run measure` yourself — on a 0.1.18 image this prints root vs tree working set, peak private bytes and CPU for the whole tree.
+Riff Rust embeds WebView2, i.e. Chromium with extra steps. The old Electron Riff typically used ~180 MB steady state; Riff Rust ships no bundled Chromium but pays for the OS WebView2 process group (browser + renderer + GPU + audio service), so the floor is the browser, not this app's code. Measured whole process tree (`riff-rust.exe` plus every `msedgewebview2.exe` child) idling at the home screen on this machine: 0.1.17 ≈ 96 MB, 0.1.18 ≈ 99–115 MB, 0.1.19 reads about 171 to 278 MB across visible window runs (depends on what the home feed fetched) and 214 MB for 0.1.18 measured the same way; minimized to tray it trims down to roughly 145 to 150 MB. Anyone claiming "under 40 MB" for a WebView2 app is measuring the wrong thing. The real wins are startup time, installer size, and background CPU (decorations and visualizers now throttle hard when the window is hidden or in the tray). No side by side numbers against upstream on the same playback scenario have been published yet; run `npm run measure` yourself — it prints root vs tree working set, peak private bytes and CPU for the whole tree. On 0.1.21 the main process reads about 3 to 6 MB and the idle whole tree roughly 20 to 50 MB depending on what the home feed cached; loading and playback spike higher and then settle.
 
 ## FAQ
 

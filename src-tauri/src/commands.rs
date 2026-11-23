@@ -416,6 +416,11 @@ pub fn import_audio_files(paths: Vec<String>) -> Vec<serde_json::Value> {
 }
 
 #[tauri::command]
+pub fn local_file_metadata(paths: Vec<String>) -> Vec<serde_json::Value> {
+    crate::library::local_file_metadata(&paths)
+}
+
+#[tauri::command]
 pub async fn import_universal_files(paths: Vec<String>) -> Vec<serde_json::Value> {
     let handle = tokio::task::spawn_blocking(move || crate::library::import_universal_files(&paths));
     handle.await.unwrap_or_default()
@@ -658,7 +663,7 @@ pub fn get_app_version() -> String {
 
 #[tauri::command]
 pub fn check_for_updates() -> serde_json::Value {
-    // Riff Rust has no release feed wired up yet; see PORTING.md.
+    // Riff Rust has no release feed wired up yet; see docs/PORTING.md.
     serde_json::json!({ "available": false })
 }
 

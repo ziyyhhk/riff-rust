@@ -22,7 +22,7 @@
   const rawInvoke = typeof internals.invoke === 'function' ? internals.invoke.bind(internals) : invoke;
 
   // Registered listeners for on* APIs (Riff responds to app-driven events;
-  // most events never fire in v0.1 — see PORTING.md).
+  // most events never fire in v0.1 — see docs/PORTING.md).
   const listeners = new Map();
   function onEvent(name, callback) {
     listeners.set(name, (listeners.get(name) || []).concat(callback));
@@ -127,11 +127,30 @@
     },
     pickLocalFiles: async () => {
       const files = await pickFiles({ multiple: true, filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'flac', 'opus', 'ogg', 'oga', 'm4a', 'aac', 'webm', 'weba'] }] });
-      return files || [];
+      if (!files || files.length === 0) return [];
+      const items = await invoke('local_file_metadata', { paths: files });
+      return (items || []).map(it => {
+        if (it && it.coverPath) {
+          it.cover = convertFileSrc(it.coverPath);
+          it.thumbnail = convertFileSrc(it.coverPath);
+        }
+        if (it && it.path) it.url = convertFileSrc(it.path);
+        return it;
+      });
     },
     pickLocalFolder: async () => {
-      const files = await pickFiles({ directory: true, multiple: false });
-      return files ? files[0] : null;
+      const dirs = await pickFiles({ directory: true, multiple: false });
+      const dir = Array.isArray(dirs) ? dirs[0] : dirs;
+      if (!dir) return [];
+      const items = await invoke('local_file_metadata', { paths: [dir] });
+      return (items || []).map(it => {
+        if (it && it.coverPath) {
+          it.cover = convertFileSrc(it.coverPath);
+          it.thumbnail = convertFileSrc(it.coverPath);
+        }
+        if (it && it.path) it.url = convertFileSrc(it.path);
+        return it;
+      });
     },
     rescanLocalMetadata: (paths) => invoke('rescan_local_metadata', { paths: paths || null }),
     pickDataDir: async () => {

@@ -396,6 +396,7 @@ fn main() {
             commands::trim_memory,
             commands::import_audio_files,
             commands::import_universal_files,
+            commands::local_file_metadata,
             commands::rescan_local_metadata,
             commands::discord_rpc_update,
             commands::discord_rpc_clear,

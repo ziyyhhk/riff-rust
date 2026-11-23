@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Text:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=0.1.20">
+  <link rel="stylesheet" href="styles.css?v=0.1.21">
   <script>if (/Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '')) document.documentElement.classList.add('platform-darwin');</script>
   <style id="tg-account-critical-css">
   #settings-nav-account.settings-account-nav-btn {
@@ -902,7 +902,11 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                 <span id="btn-download-playlist-label">Download all</span>
               </button>
-              <button class="btn-outline-pill hidden" id="btn-export-playlist" title="Export as JSON" aria-label="Export as JSON">
+              <button class="btn-outline-pill" id="btn-playlist-add-local" title="Add local files" aria-label="Add local files" type="button" style="display:inline-flex;align-items:center;gap:6px;">
+               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 1-2 2v16a2 2 0 0 1 2 2h12a2 2 0 0 1 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+               <span>Add local</span>
+             </button>
+             <button class="btn-outline-pill hidden" id="btn-export-playlist" title="Export as JSON" aria-label="Export as JSON">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                 <span>Export as JSON</span>
               </button>
@@ -3136,7 +3140,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                   </div>
                   <div style="display: flex; flex-direction: column;">
                     <span class="setting-name">Riff Rust</span>
-                    <span id="about-version" style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Version 0.1.20</span>
+                    <span id="about-version" style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Version 0.1.21</span>
                   </div>
                 </div>
                 <button class="btn-pill-primary" id="btn-check-updates" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Check for updates</button>
@@ -3173,7 +3177,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
               </svg>
               Riff Rust made by ziyyhhk &amp; rootless, support me: <a href="https://discord.gg/PsTXVKeqFZ" target="_blank" rel="noopener" id="settings-discord-link" data-invite="PsTXVKeqFZ" title="Join our Discord">discord.gg/PsTXVKeqFZ</a>
             </span>
-            <span class="settings-version-tag">v0.1.20</span>
+            <span class="settings-version-tag">v0.1.21</span>
           </div>
             </div>
           </div>
@@ -3690,6 +3694,19 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
       <div class="dialog-actions">
         <button class="btn-outline-pill" id="btn-cancel-delete-playlist">Cancel</button>
         <button class="btn-pill-primary" id="btn-confirm-delete-playlist">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="duplicate-track-modal">
+    <div class="dialog-card">
+      <div class="dialog-header">
+        <h3 id="duplicate-track-modal-title" data-i18n>Already in playlist</h3>
+      </div>
+      <p id="duplicate-track-modal-msg" style="margin: 0 0 16px; color: var(--md-sys-color-on-surface-variant); font-size: calc(14px * var(--font-scale, 1));"></p>
+      <div class="dialog-actions">
+        <button class="btn-outline-pill" id="btn-dup-do-not-add" data-i18n>Don't add</button>
+        <button class="btn-pill-primary" id="btn-dup-still-add" data-i18n>Add anyway</button>
       </div>
     </div>
   </div>
@@ -4520,7 +4537,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
     <div class="ota-update-sheet" id="update-sheet-card">
       <div class="ota-update-time" id="update-release-time">Just now</div>
       <div class="ota-update-top-row">
-        <span class="ota-update-version" id="update-version-badge">v0.1.20</span>
+        <span class="ota-update-version" id="update-version-badge">v0.1.21</span>
         <div class="ota-update-actions">
           <button class="ota-btn-update" id="btn-update-now" type="button" data-i18n>Update</button>
           <button class="ota-btn-ignore" id="btn-update-later" type="button" data-i18n>Ignore</button>
@@ -4876,7 +4893,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
   <script src="shapes.js"></script>
   <script src="lyrics-rtl.js"></script>
   <script src="track-sort.js"></script>
-  <script src="electron-shim.js?v=0.1.20"></script>
-<script src="app.js?v=0.1.20"></script>
+  <script src="electron-shim.js?v=0.1.21"></script>
+<script src="app.js?v=0.1.21"></script>
 </body>
 </html>

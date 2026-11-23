@@ -275,6 +275,95 @@ pub fn read_tags(path: &PathBuf) -> (String, String, String, u64, Option<Vec<u8>
     (title, artist, album, duration, cover)
 }
 
+/// Build display/playback-ready objects for picked local files without
+/// copying them into the library. Used by the Add files button and the
+/// playlist "add local files" flow; stream playback goes through `url`
+/// (asset protocol) or `path`.
+pub fn local_file_metadata(paths: &[String]) -> Vec<Value> {
+    use sha2::{Digest, Sha256};
+    let mut sources: Vec<PathBuf> = Vec::new();
+    for p in paths {
+        let path = PathBuf::from(p);
+        if path.is_dir() {
+            if let Ok(entries) = fs::read_dir(&path) {
+                for entry in entries.flatten() {
+                    let ep = entry.path();
+                    if ep.is_file() {
+                        if let Some(ext) = ep.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()) {
+                            if AUDIO_EXT.contains(&ext.as_str()) {
+                                sources.push(ep);
+                            }
+                        }
+                    } else if ep.is_dir() {
+                        // one level? upstream scans recursively
+                    }
+                }
+            }
+            // recursive scan
+            fn scan(dir: &PathBuf, acc: &mut Vec<PathBuf>) {
+                if let Ok(entries) = fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let ep = entry.path();
+                        if ep.is_dir() {
+                            scan(&ep, acc);
+                        } else if ep.is_file() {
+                            if let Some(ext) = ep.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()) {
+                                if AUDIO_EXT.contains(&ext.as_str()) {
+                                    acc.push(ep);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            sources.clear();
+            scan(&path, &mut sources);
+        } else if path.is_file() {
+            sources.push(path);
+        }
+    }
+    // dedup
+    let mut seen = std::collections::HashSet::new();
+    sources.retain(|p| seen.insert(p.clone()));
+
+    let mut out = Vec::new();
+    for path in sources {
+        let p = path.to_string_lossy().to_string();
+        let hash = format!("{:x}", Sha256::digest(p.as_bytes()));
+        let id = format!("local_{}", &hash[..12]);
+        let (tag_title, artist, album, duration, cover) = read_tags(&path);
+        let title = if tag_title.trim().is_empty() {
+            path.file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Unknown".to_string())
+        } else {
+            tag_title
+        };
+        let mut cover_path = String::new();
+        if let Some(bytes) = cover {
+            let _ = fs::create_dir_all(util::covers_dir());
+            let out_path = util::covers_dir().join(format!("{id}.jpg"));
+            if fs::write(&out_path, bytes).is_ok() {
+                cover_path = out_path.to_string_lossy().to_string();
+            }
+        }
+        out.push(json!({
+            "id": id,
+            "title": title,
+            "artist": if artist.is_empty() { "Unknown Artist".to_string() } else { artist },
+            "album": album,
+            "duration": duration,
+            "path": p,
+            "filePath": p,
+            "coverPath": cover_path,
+            "platform": "local",
+            "source": "local",
+            "isLocal": true
+        }));
+    }
+    out
+}
+
 /// Merge imported items into library.json and enrich with tags read from disk.
 pub fn add_to_library(items: &[Value]) {
     let mut tracks = load_library();

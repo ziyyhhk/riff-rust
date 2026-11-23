@@ -17929,17 +17929,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   function renderTracks(container, tracks, context = 'search') {
     if (!container) return;
     container._virtualTracks = tracks;
-    
+    container._lastStartIndex = -1;
+    container._lastEndIndex = -1;
+
     const scrollParent = document.querySelector('.main-content');
     if (container._vScrollHandler && scrollParent) {
       scrollParent.removeEventListener('scroll', container._vScrollHandler);
       container._vScrollHandler = null;
     }
-    
+
     container.innerHTML = '';
     container.style.paddingTop = '0px';
     container.style.paddingBottom = '0px';
-    
+
     if (!tracks || tracks.length === 0) {
       const emptyMessages = {
         search: 'No matching tracks. Try a different search',
@@ -17951,16 +17953,98 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    const currentCanonicalId = state.currentTrack ? getTrackCanonicalId(state.currentTrack) : '';
-    const fragment = document.createDocumentFragment();
-    for (let idx = 0; idx < tracks.length; idx++) {
-      const row = createTrackRow(tracks[idx], idx, currentCanonicalId, context, tracks, container);
-      row.style.setProperty('--row-idx', String(idx));
-      fragment.appendChild(row);
+    // Long lists (local library, big playlists) used to build every row at
+    // once, which stalled the UI for seconds. Only the visible slice plus
+    // overscan is rendered now; search keeps the full list because its rows
+    // can be replaced by paged results at any time.
+    const VIRTUAL_THRESHOLD = 60;
+    if (tracks.length <= VIRTUAL_THRESHOLD || !scrollParent || context === 'search') {
+      const currentCanonicalId = state.currentTrack ? getTrackCanonicalId(state.currentTrack) : '';
+      const fragment = document.createDocumentFragment();
+      for (let idx = 0; idx < tracks.length; idx++) {
+        const row = createTrackRow(tracks[idx], idx, currentCanonicalId, context, tracks, container);
+        row.style.setProperty('--row-idx', String(Math.min(idx, 20)));
+        fragment.appendChild(row);
+      }
+      container.appendChild(fragment);
+      highlightPlayingRow();
+      if (typeof refreshOverflowFades === 'function') refreshOverflowFades(container);
+      return;
     }
-    container.appendChild(fragment);
-    highlightPlayingRow();
-    if (typeof refreshOverflowFades === 'function') refreshOverflowFades(container);
+
+    const getRowStride = () => {
+      if (container._rowStride && container._rowStride > 24) return container._rowStride;
+      const isCompact = document.body.classList.contains('track-rows-compact');
+      const baseH = isCompact ? 46 : (parseInt(localStorage.getItem('riff_track_row_height') || '64', 10) || 64);
+      return baseH + 4;
+    };
+
+    const renderVirtualSlice = (isScrollUpdate = false) => {
+      if (container._isDraggingReorder) return;
+      const list = container._virtualTracks;
+      if (!Array.isArray(list) || list.length === 0) return;
+      const total = list.length;
+      const stride = getRowStride();
+      const scale = parseFloat(document.documentElement.style.getPropertyValue('--app-scale')) || 1;
+      const cRect = container.getBoundingClientRect();
+      const pRect = scrollParent.getBoundingClientRect();
+      const relTop = Math.max(0, (pRect.top - cRect.top) / scale);
+      const viewportH = (scrollParent.clientHeight || window.innerHeight || 800);
+      const overscan = 10;
+      const visibleCount = Math.ceil(viewportH / stride) + overscan * 2;
+      const rawStart = Math.max(0, Math.floor(relTop / stride) - overscan);
+      const snappedStart = Math.max(0, Math.min(Math.floor(rawStart / 4) * 4, Math.max(0, total - visibleCount)));
+      const endIndex = Math.min(total, snappedStart + visibleCount);
+
+      if (snappedStart === container._lastStartIndex && endIndex === container._lastEndIndex) return;
+      container._lastStartIndex = snappedStart;
+      container._lastEndIndex = endIndex;
+
+      container.style.paddingTop = (snappedStart * stride) + 'px';
+      container.style.paddingBottom = (Math.max(0, total - endIndex) * stride) + 'px';
+
+      const currentCanonicalId = state.currentTrack ? getTrackCanonicalId(state.currentTrack) : '';
+      const frag = document.createDocumentFragment();
+      for (let idx = snappedStart; idx < endIndex; idx++) {
+        const row = createTrackRow(list[idx], idx, currentCanonicalId, context, list, container);
+        if (isScrollUpdate) {
+          row.classList.add('no-enter-anim');
+          row.style.animation = 'none';
+        } else {
+          row.style.setProperty('--row-idx', String(Math.min(idx - snappedStart, 16)));
+        }
+        frag.appendChild(row);
+      }
+      container.innerHTML = '';
+      container.appendChild(frag);
+
+      if (!container._rowStride) {
+        const rows = container.querySelectorAll('.track-row');
+        if (rows.length >= 2) {
+          const measured = rows[1].offsetTop - rows[0].offsetTop;
+          if (measured > 24 && measured < 150) container._rowStride = measured;
+        }
+      }
+      highlightPlayingRow();
+      if (typeof refreshOverflowFades === 'function') refreshOverflowFades(container);
+    };
+
+    renderVirtualSlice(false);
+
+    let scrollRaf = 0;
+    const onScroll = () => {
+      if (scrollRaf) return;
+      scrollRaf = requestAnimationFrame(() => {
+        scrollRaf = 0;
+        if (!container.isConnected) {
+          scrollParent.removeEventListener('scroll', onScroll);
+          return;
+        }
+        renderVirtualSlice(true);
+      });
+    };
+    container._vScrollHandler = onScroll;
+    scrollParent.addEventListener('scroll', onScroll, { passive: true });
   }
 
   function highlightPlayingRow() {
@@ -21939,6 +22023,117 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
   }
 
   let trackToAddToPlaylist = null;
+
+  function isTrackInPlaylist(pl, t) {
+    if (!pl || !Array.isArray(pl.tracks) || !t) return false;
+    const tKey = (t.artist && t.title && typeof getTrackNormalizedKey === 'function')
+      ? getTrackNormalizedKey(t.artist, t.title)
+      : '';
+    return pl.tracks.some(existing => {
+      if (!existing) return false;
+      if (typeof isSameTrack === 'function' && isSameTrack(existing, t)) return true;
+      if (t.id && existing.id && String(t.id) === String(existing.id)) return true;
+      if (tKey && existing.artist && existing.title && typeof getTrackNormalizedKey === 'function') {
+        if (getTrackNormalizedKey(existing.artist, existing.title) === tKey) return true;
+      }
+      return false;
+    });
+  }
+  window.isTrackInPlaylist = isTrackInPlaylist;
+
+  function askDuplicateTrackModal(plName, duplicateTracks) {
+    return new Promise((resolve) => {
+      const modal = document.getElementById('duplicate-track-modal');
+      const titleEl = document.getElementById('duplicate-track-modal-title');
+      const msgEl = document.getElementById('duplicate-track-modal-msg');
+      const btnDoNotAdd = document.getElementById('btn-dup-do-not-add');
+      const btnStillAdd = document.getElementById('btn-dup-still-add');
+      if (!modal || !btnDoNotAdd || !btnStillAdd) {
+        resolve(false);
+        return;
+      }
+      const count = Array.isArray(duplicateTracks) ? duplicateTracks.length : 1;
+      const firstTitle = (Array.isArray(duplicateTracks) ? duplicateTracks[0]?.title : duplicateTracks?.title) || 'Track';
+      if (titleEl) titleEl.textContent = t('Already in playlist');
+      if (msgEl) {
+        msgEl.textContent = count > 1
+          ? `${count} selected tracks are already in "${plName || 'playlist'}".`
+          : `"${firstTitle}" is already in "${plName || 'playlist'}".`;
+      }
+      const cleanup = (stillAdd) => {
+        btnDoNotAdd.onclick = null;
+        btnStillAdd.onclick = null;
+        modal.onclick = null;
+        closeModal(modal);
+        resolve(stillAdd);
+      };
+      btnDoNotAdd.onclick = (e) => { e.stopPropagation(); cleanup(false); };
+      btnStillAdd.onclick = (e) => { e.stopPropagation(); cleanup(true); };
+      modal.onclick = (e) => { if (e.target === modal) cleanup(false); };
+      openModal(modal);
+    });
+  }
+  window.askDuplicateTrackModal = askDuplicateTrackModal;
+
+  async function addTracksToPlaylistWithDuplicateCheck(pl, inputTracks) {
+    if (!pl) return false;
+    if (!Array.isArray(pl.tracks)) pl.tracks = [];
+    const list = (Array.isArray(inputTracks) ? inputTracks : [inputTracks]).filter(Boolean);
+    if (list.length === 0) return false;
+
+    const duplicates = list.filter(t => isTrackInPlaylist(pl, t));
+    let tracksToInsert = list;
+
+    if (duplicates.length > 0) {
+      const stillAdd = await askDuplicateTrackModal(pl.name, duplicates);
+      if (!stillAdd) {
+        tracksToInsert = list.filter(t => !isTrackInPlaylist(pl, t));
+        if (tracksToInsert.length === 0) {
+          showToast(t('These tracks are already in the playlist'), 'info');
+          return false;
+        }
+      }
+    }
+
+    const stampedList = tracksToInsert.map(t => stampAddedAt(t));
+    pl.tracks.push(...stampedList);
+    localStorage.setItem('devsize_playlists', JSON.stringify(state.playlists));
+    renderPlaylistsList();
+    if (typeof updateRpSaveButton === 'function') updateRpSaveButton();
+
+    if (state.currentView === 'playlist-detail' && state.currentPlaylistId === pl.id) {
+      if (pl.tracks.length > 60 || stampedList.length > 30) {
+        updatePlaylistTracksUpper(pl);
+      } else {
+        animateAddPlaylistTrackRows(stampedList, pl);
+      }
+    }
+
+    if (stampedList.length === 1) {
+      showToast(`Added to "${pl.name}"`, 'success');
+    } else {
+      showToast(`Added ${stampedList.length} tracks to "${pl.name}"`, 'success');
+    }
+    return true;
+  }
+  window.addTracksToPlaylistWithDuplicateCheck = addTracksToPlaylistWithDuplicateCheck;
+
+  async function addLocalFilesToPlaylist(targetPlaylistId) {
+    const plId = targetPlaylistId || state.currentPlaylistId;
+    const pl = (state.playlists || []).find(p => p.id === plId);
+    if (!pl) return;
+    if (!window.electronAPI || typeof window.electronAPI.pickLocalFiles !== 'function') return;
+    try {
+      const tracks = await window.electronAPI.pickLocalFiles();
+      if (!tracks || tracks.length === 0) return;
+      if (typeof mergeLocalFiles === 'function') mergeLocalFiles(tracks);
+      await addTracksToPlaylistWithDuplicateCheck(pl, tracks);
+    } catch (err) {
+      console.warn('Add local files to playlist error:', err);
+    }
+  }
+  window.addLocalFilesToPlaylist = addLocalFilesToPlaylist;
+
   function openAddToPlaylistModal(track) {
     trackToAddToPlaylist = track;
     if (!el.playlistPickList) return;
@@ -22013,7 +22208,9 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
         item.className = 'playlist-pick-item';
         item.style.animationDelay = `${idx * 25}ms`;
 
-        const isAlreadyAdded = false;
+        const isAlreadyAdded = Array.isArray(track)
+          ? track.length > 0 && track.every(t => isTrackInPlaylist(pl, t))
+          : isTrackInPlaylist(pl, track);
         if (isAlreadyAdded) item.classList.add('already-added');
 
         const thumbEl = document.createElement('div');
@@ -22062,31 +22259,10 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
         item.appendChild(infoEl);
         item.appendChild(actionEl);
 
-        item.addEventListener('click', () => {
-          if (Array.isArray(track)) {
-            let addedCount = 0;
-            if (!Array.isArray(pl.tracks)) pl.tracks = [];
-            track.forEach(t => {
-              pl.tracks.push(stampAddedAt(t));
-              addedCount++;
-            });
-            localStorage.setItem('devsize_playlists', JSON.stringify(state.playlists));
-            renderPlaylistsList();
-            if (state.currentView === 'playlist-detail' && state.currentPlaylistId === pl.id) {
-              animateAddPlaylistTrackRows(track, pl);
-            }
-            showToast(`Added ${addedCount} tracks to "${pl.name}"`, 'success');
-            clearTrackSelection();
-          } else if (track) {
-            const stamped = stampAddedAt(track);
-            pl.tracks.push(stamped);
-            localStorage.setItem('devsize_playlists', JSON.stringify(state.playlists));
-            renderPlaylistsList();
-            if (state.currentView === 'playlist-detail' && state.currentPlaylistId === pl.id) {
-              animateAddPlaylistTrackRows([stamped], pl);
-            }
-            showToast(`Added to "${pl.name}"`, 'success');
-          }
+        item.addEventListener('click', async () => {
+          const added = await addTracksToPlaylistWithDuplicateCheck(pl, track);
+          if (!added) return;
+          if (Array.isArray(track)) clearTrackSelection();
           if (typeof updateRpSaveButton === 'function') updateRpSaveButton();
           if (el.addToPlaylistModal) closeModal(el.addToPlaylistModal);
         });
@@ -22840,6 +23016,12 @@ function updateNavIndicator(animate) {
   if (addLocalFolderBtn) addLocalFolderBtn.addEventListener('click', () => addLocalFolder());
   const addLocalFilesEmptyBtn = el.btnAddLocalFilesEmpty || document.getElementById('btn-add-local-files-empty');
   if (addLocalFilesEmptyBtn) addLocalFilesEmptyBtn.addEventListener('click', () => addLocalFiles());
+
+  const btnPlaylistAddLocal = document.getElementById('btn-playlist-add-local');
+  if (btnPlaylistAddLocal) btnPlaylistAddLocal.addEventListener('click', (e) => {
+    e.stopPropagation();
+    addLocalFilesToPlaylist(state.currentPlaylistId);
+  });
 
   const btnPlayLocal = el.btnPlayLocal || document.getElementById('btn-play-local');
   if (btnPlayLocal) {
@@ -31987,8 +32169,8 @@ function bindCoverHoldZoom(wrapEl) {
   (function initUpdateUI() {
     const api = window.electronAPI;
     const $ = (id) => document.getElementById(id);
-    let currentAppVersion = '0.1.20';
-    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.20' : v;
+    let currentAppVersion = '0.1.21';
+    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.21' : v;
     if (api && api.getAppVersion) {
       api.getAppVersion().then((v) => {
         if (v) {
@@ -32071,7 +32253,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.1.20';
+      if (verEl) verEl.textContent = displayVer || 'v0.1.21';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -35441,7 +35623,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.1.20';
+    let appVer = '0.1.21';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();
