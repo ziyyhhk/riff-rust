@@ -7596,6 +7596,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function playTrack(track, queueList = null, startIndex = -1, context = null) {
+    if (typeof stopHoverPreview === 'function') stopHoverPreview();
     if (track) {
       track._retryCount = 0;
       track._gaveUp = false;
