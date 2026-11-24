@@ -2617,6 +2617,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       state.serverPort = await window.electronAPI.getServerPort();
       refreshCachedTrackIds();
+      if (typeof window.syncImportedLocalTracks === 'function') {
+        window.syncImportedLocalTracks().then(() => {
+          if (typeof window.refreshNavBadges === 'function') window.refreshNavBadges();
+          if (typeof window.renderSidebarLibraryFeed === 'function') window.renderSidebarLibraryFeed();
+        }).catch(() => {});
+      }
     } catch (e) {
       console.warn('Failed to get server port:', e);
     }
@@ -20269,6 +20275,7 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
     updateHistoryBadge();
     updateQueueBadge();
   }
+  window.refreshNavBadges = refreshNavBadges;
 
   function mergeLocalFiles(newTracks) {
     if (!Array.isArray(newTracks) || newTracks.length === 0) return;
@@ -20350,6 +20357,9 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
   let localRescanDone = false;
 
   async function renderLocalFiles(forceFetch = false) {
+    if (forceFetch && typeof syncImportedLocalTracks === 'function') {
+      await syncImportedLocalTracks();
+    }
     if (!Array.isArray(state.localFiles)) {
       state.localFiles = safeArray('riff_local_files');
     }
@@ -20825,6 +20835,29 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
     } catch (_) {}
   })();
 
+  // Imported tracks live in library.json (backend), while Add files/folder
+  // populate localStorage. Merge the imported ones into the local library so
+  // "My files" shows everything regardless of which import path was used.
+  async function syncImportedLocalTracks() {
+    if (!state.serverPort) return;
+    try {
+      const res = await fetch(`http://127.0.0.1:${state.serverPort}/api/offline-library`);
+      const data = await res.json();
+      const imported = (data && Array.isArray(data.tracks))
+        ? data.tracks.filter(t => t && t.isLocal && !t.isCached)
+        : [];
+      if (!imported.length) return;
+      const byKey = new Map();
+      [...(state.localFiles || []), ...(state.localTracks || []), ...imported].forEach(t => {
+        const key = String(t.id || t.path || t.filePath || t.url || t.title || '');
+        if (key && !byKey.has(key)) byKey.set(key, t);
+      });
+      state.localFiles = Array.from(byKey.values());
+      state.localTracks = state.localFiles;
+    } catch (_) {}
+  }
+  window.syncImportedLocalTracks = syncImportedLocalTracks;
+
   async function importUniversalMusic() {
     if (!window.electronAPI || !window.electronAPI.importUniversalFiles) return;
     try {
@@ -20879,6 +20912,7 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
       }
       await Promise.all([worker(), worker()]);
 
+      await syncImportedLocalTracks();
       await renderLocalView(true);
       showToast(`Imported ${items.length} tracks`);
     } catch (e) {
@@ -43124,6 +43158,24 @@ function bindCoverHoldZoom(wrapEl) {
       `;
       likedRow.addEventListener('click', () => switchView('favorites'));
       frag.appendChild(likedRow);
+
+      const localRow = document.createElement('div');
+      localRow.className = 'sb-lib-row' + (state.currentView === 'local' ? ' active' : '');
+      localRow.title = t('My files');
+      localRow.dataset.viewTarget = 'local';
+      if (!forceAnim) localRow.classList.add('no-sb-anim');
+      const localCnt = (state.localTracks && state.localTracks.length) || 0;
+      localRow.innerHTML = `
+        <div class="sb-lib-cover local-grad">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+        </div>
+        <div class="sb-lib-info">
+          <span class="sb-lib-title">${escapeHtml(t('My files'))}</span>
+          <span class="sb-lib-sub">${localCnt} ${localCnt === 1 ? 'file' : 'files'}</span>
+        </div>
+      `;
+      localRow.addEventListener('click', () => switchView('local'));
+      frag.appendChild(localRow);
 
       const pinnedTracks = getSidebarPinnedTracks();
       if (pinnedTracks.length > 0) {
