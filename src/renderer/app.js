@@ -17671,7 +17671,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (audio) {
         try { audio.pause(); } catch (_) {}
         try { audio.removeAttribute('src'); audio.load(); } catch (_) {}
-        audio.volume = 0.45;
+        audio.volume = 0;
       }
       if (active.row) active.row.classList.remove('previewing');
       if (active.shouldCleanup && active.cleanupId && state.serverPort) {
@@ -17707,14 +17707,36 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function startHoverPreview(track, row) {
     if (!track || !row) return;
     if (hoverPreviewActive && hoverPreviewActive.track === track) return;
-    stopHoverPreview();
+    // Hard-stop any previous preview immediately (no fade) so rapid hovering
+    // between rows never leaves a fading interval clobbering the new audio.
+    if (hoverPreviewActive) {
+      const prev = hoverPreviewActive;
+      hoverPreviewActive = null;
+      if (prev.stopTimer) clearTimeout(prev.stopTimer);
+      if (prev.hardStop) clearTimeout(prev.hardStop);
+      if (prev.fadeTimer) { clearInterval(prev.fadeTimer); prev.fadeTimer = null; }
+      if (prev.row) prev.row.classList.remove('previewing');
+      if (hoverPreviewAudio) {
+        try { hoverPreviewAudio.pause(); } catch (_) {}
+        try { hoverPreviewAudio.removeAttribute('src'); hoverPreviewAudio.load(); } catch (_) {}
+        hoverPreviewAudio.volume = 0;
+      }
+      if (prev.shouldCleanup && prev.cleanupId && state.serverPort) {
+        fetch(`http://127.0.0.1:${state.serverPort}/api/preview-cleanup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: prev.cleanupId, ttlSeconds: HOVER_PREVIEW_TTL_SECONDS })
+        }).catch(() => {});
+      }
+    }
+    if (hoverPreviewTimer) { clearTimeout(hoverPreviewTimer); hoverPreviewTimer = null; }
     if (state.isPlaying && state.currentTrack && isSameTrack(state.currentTrack, track)) return;
     const id = String(track.id || '');
     const isLocalTrack = track.platform === 'local'
       || String(id).startsWith('local_')
       || String(id).startsWith('riff-')
       || Boolean(track.isLocal);
-    const active = { row, track, cleanupId: '', shouldCleanup: !isLocalTrack, stopTimer: null, hardStop: null };
+    const active = { row, track, cleanupId: '', shouldCleanup: !isLocalTrack, stopTimer: null, hardStop: null, fadeTimer: null };
     hoverPreviewActive = active;
     row.classList.add('previewing');
     try {
@@ -17771,8 +17793,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       audio.onloadedmetadata = () => {
         if (hoverPreviewActive !== active) return;
         const duration = Number(audio.duration);
-        let offset = 30;
-        if (Number.isFinite(duration) && duration > 0) {
+        let offset = 0;
+        if (Number.isFinite(duration) && duration > HOVER_PREVIEW_SECONDS + 1) {
           offset = Math.max(0, Math.min(duration * 0.4, duration - (HOVER_PREVIEW_SECONDS + 1)));
         }
         try { audio.currentTime = offset; } catch (_) {}
@@ -17867,7 +17889,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             clearTimeout(hoverPreviewTimer);
             hoverPreviewTimer = null;
           }
-          if (hoverPreviewActive && hoverPreviewActive.row === row) stopHoverPreview();
         });
       }
 
