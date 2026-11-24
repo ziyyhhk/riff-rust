@@ -6,6 +6,10 @@ authors = ["rootscripts", "Riff Rust contributors"]
 edition = "2021"
 default-run = "riff-rust"
 
+[lib]
+name = "riff_rust"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
