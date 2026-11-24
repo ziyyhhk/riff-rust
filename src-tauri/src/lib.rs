@@ -486,21 +486,25 @@ pub fn run() {
             let (win_w, win_h, win_x, win_y, win_maximized) = startup_geometry(app);
             // Cap WebView2 at one renderer process for this single static page.
             // Keep wry's default feature disables explicitly (this flag overrides them).
+            #[cfg(any(target_os = "android", target_os = "ios"))]
             let window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App(start_url.into()))
-                // Composite on the GPU but raster on the CPU. Full software
-                // compositing made one full window composite cost 50 to 60 ms
-                // (20 fps), while letting the GPU rasterize large panels then
-                // blocked the main thread for hundreds of ms on first paint.
-                // This keeps frames cheap without the GPU tile memory.
+                .title("Riff Rust")
+                .visible(true)
+                .background_color(bg)
+                .initialization_script(&boot)
+                .build()?;
+
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            let window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App(start_url.into()))
                 .additional_browser_args("--renderer-process-limit=1 --disable-gpu-rasterization --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-networking --disable-component-update --disable-domain-reliability --no-pings --js-flags=--expose-gc")
                 .title("Riff Rust")
                 .inner_size(win_w, win_h)
                 .position(win_x, win_y)
-                .min_inner_size(if mobile { 0.0 } else { 800.0 }, if mobile { 0.0 } else { 540.0 })
-                .decorations(!mobile)
-                .resizable(!mobile)
-                .visible(mobile)
-                .maximized(win_maximized && !mobile)
+                .min_inner_size(800.0, 540.0)
+                .decorations(false)
+                .resizable(true)
+                .visible(false)
+                .maximized(win_maximized)
                 .background_color(bg)
                 .initialization_script(&boot)
                 .on_page_load(|window, payload| {

@@ -514,7 +514,7 @@ mod mobile {
     pub struct DiscordRpc;
     impl DiscordRpc {
         pub fn new() -> Self { Self }
-        pub fn set_enabled(&self, _: bool) {}
+        pub fn set_enabled(&self, _: bool) -> bool { false }
         pub fn is_enabled(&self) -> bool { false }
         pub fn is_connected(&self) -> bool { false }
         pub fn set_activity(&self, _: serde_json::Value) {}

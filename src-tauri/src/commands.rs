@@ -123,6 +123,7 @@ pub fn get_server_port(state: State<'_, Shared>) -> u16 {
     state.server_port
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub fn window_minimize(app: AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -130,6 +131,11 @@ pub fn window_minimize(app: AppHandle) {
     }
 }
 
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+pub fn window_minimize(_app: AppHandle) {}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub fn window_maximize(app: AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -140,6 +146,10 @@ pub fn window_maximize(app: AppHandle) {
         }
     }
 }
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+pub fn window_maximize(_app: AppHandle) {}
 
 #[tauri::command]
 pub fn window_close(app: AppHandle) {
@@ -153,6 +163,7 @@ pub fn set_window_buttons_visible(_visible: bool) -> bool {
     true
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub fn toggle_mini_window(app: AppHandle, state: State<'_, Shared>) -> bool {
     let Some(window) = app.get_webview_window("main") else {
@@ -198,6 +209,12 @@ pub fn toggle_mini_window(app: AppHandle, state: State<'_, Shared>) -> bool {
         }
         false
     }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+pub fn toggle_mini_window(_app: AppHandle, _state: State<'_, Shared>) -> bool {
+    false
 }
 
 #[tauri::command]
