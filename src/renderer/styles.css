@@ -17062,3 +17062,17 @@ body:not(.sidebar-expanded):not(.mini) .sidebar-nav::-webkit-scrollbar { display
 #tg-account-hero.tg-account-hero.custom-banner::after {
   background: linear-gradient(180deg, rgba(0,0,0,.10) 0%, rgba(0,0,0,.45) 100%) !important;
 }
+
+.tg-account-banner-video {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+}
+#tg-account-hero.tg-account-hero > .tg-account-pattern,
+#tg-account-hero.tg-account-hero > .tg-account-center {
+  z-index: 2 !important;
+}

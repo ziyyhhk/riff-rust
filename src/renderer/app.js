@@ -17691,6 +17691,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (active.stopTimer) clearTimeout(active.stopTimer);
     if (active.hardStop) clearTimeout(active.hardStop);
     if (active.fadeTimer) { clearInterval(active.fadeTimer); active.fadeTimer = null; }
+    if (active.hls) { try { active.hls.destroy(); } catch (_) {} active.hls = null; }
     const audio = hoverPreviewAudio;
     const finishStop = () => {
       if (audio) {
@@ -17729,6 +17730,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  function fadeInPreviewAudio(audio, active) {
+    if (hoverPreviewActive !== active) return;
+    if (active.fadeTimer) { clearInterval(active.fadeTimer); active.fadeTimer = null; }
+    if (active.fadedIn) return;
+    active.fadedIn = true;
+    const targetVol = 0.45;
+    const steps = 20;
+    const stepMs = 22;
+    let j = 0;
+    audio.volume = 0;
+    active.fadeTimer = setInterval(() => {
+      if (hoverPreviewActive !== active) { clearInterval(active.fadeTimer); active.fadeTimer = null; return; }
+      j++;
+      const v = targetVol * (j / steps);
+      if (j >= steps) {
+        clearInterval(active.fadeTimer);
+        active.fadeTimer = null;
+        if (hoverPreviewAudio === audio) audio.volume = targetVol;
+      } else if (hoverPreviewAudio === audio) {
+        audio.volume = v;
+      }
+    }, stepMs);
+  }
+
   async function startHoverPreview(track, row) {
     if (!track || !row) return;
     if (hoverPreviewActive && hoverPreviewActive.track === track) return;
@@ -17740,6 +17765,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (prev.stopTimer) clearTimeout(prev.stopTimer);
       if (prev.hardStop) clearTimeout(prev.hardStop);
       if (prev.fadeTimer) { clearInterval(prev.fadeTimer); prev.fadeTimer = null; }
+      if (prev.hls) { try { prev.hls.destroy(); } catch (_) {} prev.hls = null; }
       if (prev.row) prev.row.classList.remove('previewing');
       if (hoverPreviewAudio) {
         try { hoverPreviewAudio.pause(); } catch (_) {}
@@ -17761,7 +17787,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       || String(id).startsWith('local_')
       || String(id).startsWith('riff-')
       || Boolean(track.isLocal);
-    const active = { row, track, cleanupId: '', shouldCleanup: !isLocalTrack, stopTimer: null, hardStop: null, fadeTimer: null };
+    const active = { row, track, cleanupId: '', shouldCleanup: !isLocalTrack, stopTimer: null, hardStop: null, fadeTimer: null, hls: null, fadedIn: false };
     hoverPreviewActive = active;
     row.classList.add('previewing');
     try {
@@ -17834,25 +17860,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         active.stopTimer = setTimeout(() => {
           if (hoverPreviewActive === active) stopHoverPreview();
         }, HOVER_PREVIEW_SECONDS * 1000);
-        // Fade in
-        if (active.fadeTimer) { clearInterval(active.fadeTimer); active.fadeTimer = null; }
-        const targetVol = 0.45;
-        const stepsIn = 10;
-        const stepMsIn = 20;
-        let j = 0;
-        active.fadeTimer = setInterval(() => {
-          if (hoverPreviewActive !== active) { clearInterval(active.fadeTimer); active.fadeTimer = null; return; }
-          j++;
-          const v = targetVol * (j / stepsIn);
-          if (j >= stepsIn) {
-            clearInterval(active.fadeTimer);
-            active.fadeTimer = null;
-            if (hoverPreviewAudio === audio) audio.volume = targetVol;
-          } else {
-            if (hoverPreviewAudio === audio) audio.volume = v;
-          }
-        }, stepMsIn);
+        fadeInPreviewAudio(audio, active);
       };
+      audio.oncanplay = () => fadeInPreviewAudio(audio, active);
       audio.onended = () => {
         if (hoverPreviewActive === active) stopHoverPreview();
       };
@@ -17862,13 +17872,28 @@ document.addEventListener('DOMContentLoaded', async () => {
       active.hardStop = setTimeout(() => {
         if (hoverPreviewActive === active) stopHoverPreview();
       }, 30000);
-      audio.src = url;
-      audio.load();
-      const playResult = audio.play();
-      if (playResult && typeof playResult.catch === 'function') {
-        playResult.catch(() => {
-          if (hoverPreviewActive === active) stopHoverPreview();
+      if (url.includes('.m3u8') && window.Hls && Hls.isSupported()) {
+        const hls = new Hls({ enableWorker: false, lowLatencyMode: true, maxBufferLength: 6, maxMaxBufferLength: 12, maxBufferSize: 2 * 1024 * 1024 });
+        active.hls = hls;
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data && data.fatal && hoverPreviewActive === active) stopHoverPreview();
         });
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (hoverPreviewActive !== active) return;
+          const p = audio.play();
+          if (p && typeof p.catch === 'function') p.catch(() => { if (hoverPreviewActive === active) stopHoverPreview(); });
+        });
+        hls.loadSource(url);
+        hls.attachMedia(audio);
+      } else {
+        audio.src = url;
+        audio.load();
+        const playResult = audio.play();
+        if (playResult && typeof playResult.catch === 'function') {
+          playResult.catch(() => {
+            if (hoverPreviewActive === active) stopHoverPreview();
+          });
+        }
       }
     } catch (_) {
       stopHoverPreview();
@@ -30798,6 +30823,11 @@ function bindCoverHoldZoom(wrapEl) {
     if (cat === 'custom-themes' && typeof renderThemeCards === 'function' && !document.getElementById('custom-themes-list')?.children.length) renderThemeCards();
     if (cat === 'plugins' && typeof reloadPluginsList === 'function') reloadPluginsList();
     if (cat === 'account' && typeof syncLocalAccountUI === 'function') syncLocalAccountUI();
+    if (cat === 'account' && typeof syncAccountBannerUI === 'function') syncAccountBannerUI();
+    if (cat !== 'account') {
+      const v = document.getElementById('tg-account-banner-video');
+      if (v) { try { v.pause(); } catch (_) {} v.style.display = 'none'; }
+    }
     requestAnimationFrame(() => {
       // Runs inside the frame that lays the new category out anyway, so the
       // scroll reset never adds a second synchronous layout to the click.
@@ -36700,8 +36730,10 @@ function bindCoverHoldZoom(wrapEl) {
   // Profile banner: default is the generated gradient hero. Turning the toggle
   // off reveals the custom banner controls and uses the chosen image instead.
   const accountHero = document.getElementById('tg-account-hero');
+  const bannerVideo = document.getElementById('tg-account-banner-video');
   const bannerToggle = document.getElementById('btn-acc-default-banner');
   const bannerRow = document.getElementById('acc-banner-row');
+  const isBannerVideo = (u) => /\.(mp4|webm|mov|mkv|avi)(?:\?|$)/i.test(String(u || ''));
 
   function syncAccountBannerUI() {
     const useDefault = localStorage.getItem('riff_use_default_banner') !== '0';
@@ -36710,14 +36742,30 @@ function bindCoverHoldZoom(wrapEl) {
       bannerToggle.setAttribute('aria-pressed', useDefault ? 'true' : 'false');
     }
     if (bannerRow) bannerRow.style.display = useDefault ? 'none' : '';
+    const banner = useDefault ? '' : toMediaUrl((localStorage.getItem('riff_user_banner') || '').trim());
+    const videoMode = Boolean(banner) && isBannerVideo(banner);
     if (accountHero) {
-      const banner = useDefault ? '' : toMediaUrl((localStorage.getItem('riff_user_banner') || '').trim());
-      accountHero.classList.toggle('custom-banner', Boolean(banner));
+      accountHero.classList.toggle('custom-banner', Boolean(banner) && !videoMode);
       accountHero.classList.toggle('custom-banner-enabled', !useDefault);
-      if (banner) {
+      if (banner && !videoMode) {
         accountHero.style.setProperty('--acc-banner-img', `url("${banner}")`);
       } else {
         accountHero.style.removeProperty('--acc-banner-img');
+      }
+    }
+    if (bannerVideo) {
+      const visible = window.getComputedStyle(document.getElementById('settings-section-account') || document.body).display !== 'none';
+      if (videoMode && visible) {
+        if (bannerVideo.dataset.src !== banner) {
+          bannerVideo.dataset.src = banner;
+          bannerVideo.src = banner;
+        }
+        bannerVideo.style.display = '';
+        const p = bannerVideo.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } else {
+        try { bannerVideo.pause(); } catch (_) {}
+        bannerVideo.style.display = 'none';
       }
     }
   }
