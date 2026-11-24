@@ -31,7 +31,7 @@ impl Default for ToolInstallState {
         Self {
             status: "idle".to_string(),
             tool: String::new(),
-            percent: 100,
+            percent: 0,
             error: String::new(),
             ffmpeg_error: String::new(),
         }

@@ -431,6 +431,63 @@ pub fn prune_cache_limit() -> u64 {
     freed
 }
 
+/// Auto-purge of the stream cache / offline library (both live in `tracks/`).
+/// Intervals come from the renderer storage map: `riff_cache_clear_days`
+/// (default 7) and `riff_offline_clear_days` (default 30); 0 disables a purge.
+/// Last-run timestamps persist in `auto-clean.json`; a missing file is seeded
+/// with "now" so an app update never wipes an existing library on first launch.
+/// Returns bytes freed.
+pub fn auto_clean_tick() -> u64 {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let path = data_dir().join("auto-clean.json");
+    let mut stamps = read_json_file(&path);
+    if !stamps.is_object() {
+        stamps = serde_json::json!({});
+    }
+    if stamps.get("lastCacheClean").is_none() && stamps.get("lastOfflineClean").is_none() {
+        let _ = write_json_file(
+            &path,
+            &serde_json::json!({ "lastCacheClean": now, "lastOfflineClean": now }),
+        );
+        return 0;
+    }
+    let storage = read_json_file(&storage_path());
+    let read_days = |key: &str, default: u64| -> u64 {
+        storage
+            .get(key)
+            .and_then(|v| {
+                v.as_f64()
+                    .or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok()))
+            })
+            .map(|d| d.max(0.0) as u64)
+            .unwrap_or(default)
+    };
+    let mut freed = 0u64;
+    let due = |days: u64, stamp: &str| -> bool {
+        if days == 0 {
+            return false;
+        }
+        let last = stamps.get(stamp).and_then(|v| v.as_u64()).unwrap_or(0);
+        now.saturating_sub(last) >= days.saturating_mul(86_400)
+    };
+    let cache_days = read_days("riff_cache_clear_days", 7);
+    let offline_days = read_days("riff_offline_clear_days", 30);
+    if due(cache_days, "lastCacheClean") || due(offline_days, "lastOfflineClean") {
+        // Both settings target the same tracks/ folder: the existing Clear cache
+        // and Clear offline library buttons do too. One sweep satisfies both, so
+        // stamp both timers to avoid a redundant second pass on the next tick.
+        freed += clear_dir_contents(&cache_dir());
+        stamps["lastCacheClean"] = serde_json::json!(now);
+        stamps["lastOfflineClean"] = serde_json::json!(now);
+        let _ = write_json_file(&path, &stamps);
+        log_line("INFO", &format!("auto-clean freed {freed} bytes from tracks/"));
+    }
+    freed
+}
+
 /// Percent-encode a full string (for building outbound URLs).
 pub fn percent_encode(input: &str) -> String {
     let mut out = String::with_capacity(input.len());

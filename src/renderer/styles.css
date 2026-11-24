@@ -3690,7 +3690,9 @@ body.m3-cover-on .artwork-wrapper {
 .tvk-controls .control-btn.active,
 #btn-shuffle.active,
 #btn-repeat.active,
+#btn-smart-shuffle.active,
 #btn-tvk-shuffle.active,
+#btn-tvk-smart-shuffle.active,
 #btn-tvk-repeat.active {
   background: transparent !important;
   box-shadow: none !important;
@@ -3702,7 +3704,9 @@ body.m3-cover-on .artwork-wrapper {
 .tvk-controls .control-btn.active::after,
 #btn-shuffle.active::after,
 #btn-repeat.active::after,
+#btn-smart-shuffle.active::after,
 #btn-tvk-shuffle.active::after,
+#btn-tvk-smart-shuffle.active::after,
 #btn-tvk-repeat.active::after {
   content: "";
   position: absolute;
@@ -3717,7 +3721,8 @@ body.m3-cover-on .artwork-wrapper {
 }
 
 #btn-shuffle,
-#btn-repeat {
+#btn-repeat,
+#btn-smart-shuffle {
   width: 36px;
   height: 36px;
   padding: 0;
@@ -3728,7 +3733,8 @@ body.m3-cover-on .artwork-wrapper {
   box-shadow: none;
 }
 #btn-shuffle:hover,
-#btn-repeat:hover {
+#btn-repeat:hover,
+#btn-smart-shuffle:hover {
   background: transparent;
   box-shadow: none;
 }
@@ -16993,3 +16999,33 @@ body.riff-paused .glass-card {
 .sb-lucky-pill-btn:active { transform: scale(.97); }
 .sb-lucky-pill-btn svg { display: block; }
 body:not(.sidebar-expanded):not(.mini) .sidebar-nav::-webkit-scrollbar { display: none !important; }
+/* ===== Smart shuffle ===== */
+#btn-playlist-smart-shuffle.active,
+#btn-playlist-smart-shuffle.active:hover {
+  color: var(--md-sys-color-primary, #d0bcff) !important;
+  background: color-mix(in srgb, var(--md-sys-color-primary, #d0bcff) 16%, transparent) !important;
+}
+
+/* ===== Hover preview indicator ===== */
+.track-row.previewing {
+  background: color-mix(in srgb, var(--md-sys-color-primary, #d0bcff) 9%, transparent);
+}
+.track-row.previewing .track-num-text {
+  display: none;
+}
+.track-row.previewing .track-row-num::after {
+  content: "\266A";
+  display: block;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--md-sys-color-primary, #d0bcff);
+  animation: riff-preview-pulse 1s ease-in-out infinite;
+}
+@keyframes riff-preview-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .track-row.previewing .track-row-num::after { animation: none; opacity: 1; }
+}

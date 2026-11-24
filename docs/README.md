@@ -4,7 +4,7 @@ Everything that is not code lives here, so the repository root stays clean.
 
 | Path | What it is |
 |------|------------|
-| `releases/` | Per-version release notes (`v0.1.11.md` … `v0.1.21.md`). |
+| `releases/` | Per-version release notes (`v0.1.11.md` … `v0.1.22.md`). |
 | `HANDOFF.md` | Session handoff: read this first when picking the project up. |
 | `PORTING.md` | Authoritative feature-by-feature porting status vs upstream Riff. |
 | `img/` | README / branding artwork (hero, banner, social preview, emoji). |

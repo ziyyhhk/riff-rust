@@ -7,7 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Text:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=0.1.21">
+  <link rel="stylesheet" href="styles.css?v=0.1.22">
+  <link rel="stylesheet" href="updater.css?v=0.1.22">
   <script>if (/Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '')) document.documentElement.classList.add('platform-darwin');</script>
   <style id="tg-account-critical-css">
   #settings-nav-account.settings-account-nav-btn {
@@ -897,6 +898,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
               </select>
               <button class="sp-hero-play-btn" id="btn-play-playlist" title="Play" aria-label="Play" type="button"><svg width="36" height="36" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5.25C7 4.22 8.13 3.59 9.01 4.14L18.8 10.89C19.6 11.39 19.6 12.61 18.8 13.11L9.01 19.86C8.13 20.41 7 19.78 7 18.75V5.25Z"/></svg></button>
               <button class="sp-quiet-icon-btn" id="btn-play-playlist-shuffle" title="Shuffle play" aria-label="Shuffle play" type="button"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg></button>
+              <button class="sp-quiet-icon-btn" id="btn-playlist-smart-shuffle" title="Smart shuffle" aria-label="Smart shuffle" type="button"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5l1.6 4.1 4.1 1.6-4.1 1.6L12 15.9l-1.6-4.1-4.1-1.6 4.1-1.6L12 4.5z"></path><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z"></path><path d="M5.5 3.5v3"></path><path d="M4 5h3"></path></svg></button>
               <button class="sp-quiet-icon-btn" id="btn-playlist-more" title="More options" aria-label="More options" type="button"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="19" cy="12" r="2"></circle></svg></button>
               <button class="btn-outline-pill hidden" id="btn-download-playlist" title="Download all songs" aria-label="Download all songs">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
@@ -2640,6 +2642,28 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
               </div>
             </div>
 
+            <div class="setting-item" id="cache-clear-item">
+              <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--md-sys-color-surface-container-high); display: flex; align-items: center; justify-content: center; color: var(--md-sys-color-primary);">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9 2h6"/></svg>
+                  </div>
+                  <div style="display: flex; flex-direction: column;">
+                    <span class="setting-name">Clear cache every</span>
+                    <span style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Automatically delete temporary cache files</span>
+                  </div>
+                </div>
+                <select class="pill-select" id="cache-clear-days" title="Clear cache every" aria-label="Clear cache every" style="flex-shrink: 0;">
+                  <option value="1">1 day</option>
+                  <option value="3">3 days</option>
+                  <option value="7" selected>7 days</option>
+                  <option value="14">14 days</option>
+                  <option value="30">30 days</option>
+                  <option value="0">Never</option>
+                </select>
+              </div>
+            </div>
+
             <div class="setting-item" id="tools-row">
               <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
                 <div style="display: flex; align-items: center; gap: 12px;">
@@ -2668,6 +2692,28 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                   </div>
                 </div>
                 <button class="btn-outline-pill" id="btn-clear-offline" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Clear</button>
+              </div>
+            </div>
+
+            <div class="setting-item" id="offline-clear-item">
+              <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--md-sys-color-surface-container-high); display: flex; align-items: center; justify-content: center; color: var(--md-sys-color-primary);">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/><circle cx="18.5" cy="5.5" r="3.5"/><path d="M18.5 4v1.5l1 1"/></svg>
+                  </div>
+                  <div style="display: flex; flex-direction: column;">
+                    <span class="setting-name">Clear offline library every</span>
+                    <span style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Automatically delete downloaded offline tracks</span>
+                  </div>
+                </div>
+                <select class="pill-select" id="offline-clear-days" title="Clear offline library every" aria-label="Clear offline library every" style="flex-shrink: 0;">
+                  <option value="7">7 days</option>
+                  <option value="14">14 days</option>
+                  <option value="30" selected>30 days</option>
+                  <option value="60">60 days</option>
+                  <option value="90">90 days</option>
+                  <option value="0">Never</option>
+                </select>
               </div>
             </div>
 
@@ -3140,7 +3186,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                   </div>
                   <div style="display: flex; flex-direction: column;">
                     <span class="setting-name">Riff Rust</span>
-                    <span id="about-version" style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Version 0.1.21</span>
+                    <span id="about-version" style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Version 0.1.22</span>
                   </div>
                 </div>
                 <button class="btn-pill-primary" id="btn-check-updates" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Check for updates</button>
@@ -3177,7 +3223,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
               </svg>
               Riff Rust made by ziyyhhk &amp; rootless, support me: <a href="https://discord.gg/PsTXVKeqFZ" target="_blank" rel="noopener" id="settings-discord-link" data-invite="PsTXVKeqFZ" title="Join our Discord">discord.gg/PsTXVKeqFZ</a>
             </span>
-            <span class="settings-version-tag">v0.1.21</span>
+            <span class="settings-version-tag">v0.1.22</span>
           </div>
             </div>
           </div>
@@ -3289,6 +3335,9 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
       <div class="playback-controls">
         <button class="control-btn" id="btn-shuffle" title="Shuffle">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>
+        </button>
+        <button class="control-btn" id="btn-smart-shuffle" title="Smart shuffle" aria-label="Smart shuffle">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5l1.6 4.1 4.1 1.6-4.1 1.6L12 15.9l-1.6-4.1-4.1-1.6 4.1-1.6L12 4.5z"></path><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z"></path><path d="M5.5 3.5v3"></path><path d="M4 5h3"></path></svg>
         </button>
         <button class="control-btn" id="btn-prev" title="Previous">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M18 5.5v13L8.5 12z"/><line x1="6" y1="6" x2="6" y2="18"/></svg>
@@ -4537,7 +4586,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
     <div class="ota-update-sheet" id="update-sheet-card">
       <div class="ota-update-time" id="update-release-time">Just now</div>
       <div class="ota-update-top-row">
-        <span class="ota-update-version" id="update-version-badge">v0.1.21</span>
+        <span class="ota-update-version" id="update-version-badge">v0.1.22</span>
         <div class="ota-update-actions">
           <button class="ota-btn-update" id="btn-update-now" type="button" data-i18n>Update</button>
           <button class="ota-btn-ignore" id="btn-update-later" type="button" data-i18n>Ignore</button>
@@ -4794,6 +4843,9 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
           <button class="control-btn" id="btn-tvk-shuffle" title="Shuffle" aria-label="Shuffle">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>
           </button>
+          <button class="control-btn" id="btn-tvk-smart-shuffle" title="Smart shuffle" aria-label="Smart shuffle">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5l1.6 4.1 4.1 1.6-4.1 1.6L12 15.9l-1.6-4.1-4.1-1.6 4.1-1.6L12 4.5z"></path><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z"></path><path d="M5.5 3.5v3"></path><path d="M4 5h3"></path></svg>
+          </button>
           <button class="control-btn" id="btn-tvk-prev" title="Previous" aria-label="Previous">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M18 5.5v13L8.5 12z"/><line x1="6" y1="6" x2="6" y2="18"/></svg>
           </button>
@@ -4893,7 +4945,8 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
   <script src="shapes.js"></script>
   <script src="lyrics-rtl.js"></script>
   <script src="track-sort.js"></script>
-  <script src="electron-shim.js?v=0.1.21"></script>
-<script src="app.js?v=0.1.21"></script>
+  <script src="electron-shim.js?v=0.1.22"></script>
+  <script src="updater.js?v=0.1.22" defer></script>
+<script src="app.js?v=0.1.22"></script>
 </body>
 </html>

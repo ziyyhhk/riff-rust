@@ -2483,6 +2483,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     volume: savedVolume,
     isRepeat: localStorage.getItem('riff_repeat') === '1',
     isShuffle: localStorage.getItem('riff_shuffle') === '1',
+    smartShuffle: localStorage.getItem('riff_smart_shuffle') === '1',
+    _smartShuffleArtists: [],
     isAutoRemix: false,
     myWaveActive: false,
     isRadioQueue: false,
@@ -7755,6 +7757,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const isAutoplayContext = typeof autoplayEnabled === 'function' && autoplayEnabled() &&
       !state.isShuffle &&
+      !state.smartShuffle &&
       (context === 'search' || context === 'history' || context === 'favorites');
 
     const isFreshQueue = Boolean(queueList && queueList !== state.queue && context !== 'queue' && (!track || !track._isAutoplay));
@@ -11707,6 +11710,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   const btnTvkShuffle = document.getElementById('btn-tvk-shuffle');
+  const btnTvkSmartShuffle = document.getElementById('btn-tvk-smart-shuffle');
   const btnTvkPrev = document.getElementById('btn-tvk-prev');
   const btnTvkPlay = document.getElementById('btn-tvk-play');
   const btnTvkNext = document.getElementById('btn-tvk-next');
@@ -11719,6 +11723,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       btnTvkShuffle.classList.toggle('active', el.btnShuffle.classList.contains('active'));
     });
     obsShuffle.observe(el.btnShuffle, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  if (btnTvkSmartShuffle) {
+    btnTvkSmartShuffle.addEventListener('click', () => {
+      if (typeof window.setSmartShuffle === 'function') window.setSmartShuffle(!state.smartShuffle);
+    });
+    btnTvkSmartShuffle.classList.toggle('active', state.smartShuffle);
   }
 
   function setupSeekOrSkipButton(button, onSkip, deltaSec) {
@@ -13312,7 +13323,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function maybePrepareAutoplay() {
-    if (!autoplayEnabled() || state.isRadioQueue || state.isShuffle || state.isRepeat) return;
+    if (!autoplayEnabled() || state.isRadioQueue || state.isShuffle || state.smartShuffle || state.isRepeat) return;
     if (!state.currentTrack || !Array.isArray(state.queue) || state.queue.length === 0) return;
     ensureAutoplayBuffer();
     if (state.queueIndex + 1 < state.queue.length) return;
@@ -13369,11 +13380,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       }
 
-      if (!state.isRadioQueue && !state.isShuffle && state.queueIndex + 1 >= state.queue.length && autoplayEnabled()) {
+      if (!state.isRadioQueue && !state.isShuffle && !state.smartShuffle && state.queueIndex + 1 >= state.queue.length && autoplayEnabled()) {
         if (await startAutoplay()) return;
       }
 
-      if (state.isShuffle) {
+      if (state.isShuffle || state.smartShuffle) {
         const provider = shuffleProvider;
         let nextIdx = -1;
         if (provider) {
@@ -13413,9 +13424,31 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (pool.length === 0) {
             state._shufflePlayedIndices.clear();
             state._shufflePlayedIds.clear();
+            state._smartShuffleArtists = [];
             pool = eligible.length > 1 ? eligible.filter(index => index !== state.queueIndex) : eligible;
           }
+          if (state.smartShuffle && pool.length > 1) {
+            // Smart shuffle: never the same artist twice in a row, and spread
+            // the last few artists apart. Falls back gracefully when the queue
+            // has only one artist (whole albums, single-artist playlists).
+            const normArtist = (value) => String(value || '').trim().toLowerCase();
+            const currentArtist = normArtist(state.currentTrack && state.currentTrack.artist);
+            const recentArtists = new Set((state._smartShuffleArtists || []).slice(-4));
+            const differentArtist = pool.filter(index => normArtist(state.queue[index] && state.queue[index].artist) !== currentArtist);
+            const freshArtist = differentArtist.filter(index => {
+              const artist = normArtist(state.queue[index] && state.queue[index].artist);
+              return !artist || !recentArtists.has(artist);
+            });
+            if (freshArtist.length) pool = freshArtist;
+            else if (differentArtist.length) pool = differentArtist;
+          }
           nextIdx = pool[Math.floor(Math.random() * pool.length)];
+          if (state.smartShuffle) {
+            const pickedArtist = String((state.queue[nextIdx] && state.queue[nextIdx].artist) || '').trim().toLowerCase();
+            if (pickedArtist) {
+              state._smartShuffleArtists = (state._smartShuffleArtists || []).concat(pickedArtist).slice(-8);
+            }
+          }
           state._shufflePlayedIndices.add(nextIdx);
           const nextCid = getTrackCanonicalId(state.queue[nextIdx]);
           if (nextCid) state._shufflePlayedIds.add(nextCid);
@@ -17607,6 +17640,152 @@ document.addEventListener('DOMContentLoaded', async () => {
       .catch(() => {});
   }
 
+  // ------------------------------------------------------------ hover preview
+  // Hovering a row resolves a 15 s snippet that starts near the hook (40% in,
+  // clamped so a full 15 s always fits). It plays through its own Audio element
+  // so the real player, queue and now-playing state never change. The resolve
+  // can cache the stream on disk, so when the preview stops we ask the backend
+  // to delete that file 3 minutes later. Local library files and tracks that
+  // were already offline are never scheduled for deletion.
+  const HOVER_PREVIEW_SECONDS = 15;
+  const HOVER_PREVIEW_TTL_SECONDS = 180;
+  const HOVER_PREVIEW_DELAY_MS = 450;
+  let hoverPreviewTimer = null;
+  let hoverPreviewAudio = null;
+  let hoverPreviewActive = null;
+
+  function stopHoverPreview() {
+    if (hoverPreviewTimer) {
+      clearTimeout(hoverPreviewTimer);
+      hoverPreviewTimer = null;
+    }
+    const active = hoverPreviewActive;
+    hoverPreviewActive = null;
+    if (!active) return;
+    if (active.stopTimer) clearTimeout(active.stopTimer);
+    if (active.hardStop) clearTimeout(active.hardStop);
+    if (hoverPreviewAudio) {
+      try { hoverPreviewAudio.pause(); } catch (_) {}
+      try {
+        hoverPreviewAudio.removeAttribute('src');
+        hoverPreviewAudio.load();
+      } catch (_) {}
+    }
+    if (active.row) active.row.classList.remove('previewing');
+    if (active.shouldCleanup && active.cleanupId && state.serverPort) {
+      fetch(`http://127.0.0.1:${state.serverPort}/api/preview-cleanup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: active.cleanupId, ttlSeconds: HOVER_PREVIEW_TTL_SECONDS })
+      }).catch(() => {});
+    }
+  }
+
+  async function startHoverPreview(track, row) {
+    if (!track || !row) return;
+    if (hoverPreviewActive && hoverPreviewActive.track === track) return;
+    stopHoverPreview();
+    if (state.isPlaying && state.currentTrack && isSameTrack(state.currentTrack, track)) return;
+    const id = String(track.id || '');
+    const isLocalTrack = track.platform === 'local'
+      || String(id).startsWith('local_')
+      || String(id).startsWith('riff-')
+      || Boolean(track.isLocal);
+    const active = { row, track, cleanupId: '', shouldCleanup: !isLocalTrack, stopTimer: null, hardStop: null };
+    hoverPreviewActive = active;
+    row.classList.add('previewing');
+    try {
+      let url = '';
+      if (isLocalTrack) {
+        if (track.url && (String(track.url).startsWith('http') || String(track.url).startsWith('file:'))) {
+          url = track.url;
+        } else if (track.path) {
+          url = String(track.path).startsWith('file:') ? track.path : 'file://' + encodeURI(track.path);
+        } else {
+          url = `http://127.0.0.1:${state.serverPort}/api/library-file?id=${encodeURIComponent(id)}`;
+        }
+      } else {
+        let preCached = false;
+        if (id) {
+          try {
+            const cachedRes = await fetch(`http://127.0.0.1:${state.serverPort}/api/check-cache?id=${encodeURIComponent(id)}`);
+            const cachedData = await cachedRes.json();
+            preCached = Boolean(cachedData && cachedData.cached);
+          } catch (_) {}
+        }
+        if (hoverPreviewActive !== active) return;
+        if (preCached) active.shouldCleanup = false;
+        const quality = localStorage.getItem('riff_audio_quality') || 'medium';
+        const infoUrl = `http://127.0.0.1:${state.serverPort}/api/stream-info?id=${encodeURIComponent(id)}`
+          + `&url=${encodeURIComponent(track.url || '')}`
+          + `&platform=${encodeURIComponent(track.platform || state.platform || 'ytmusic')}`
+          + `&title=${encodeURIComponent(track.title || '')}`
+          + `&artist=${encodeURIComponent(track.artist || '')}`
+          + `&duration=${encodeURIComponent(track.duration || 0)}`
+          + `&quality=${encodeURIComponent(quality)}`;
+        const infoRes = await fetch(infoUrl);
+        const info = await infoRes.json();
+        if (hoverPreviewActive !== active) return;
+        if (!info || !info.success) {
+          stopHoverPreview();
+          return;
+        }
+        url = info.isLocal ? (info.streamUrl || '') : (info.proxyUrl || info.streamUrl || '');
+        active.cleanupId = info.resolvedId || id;
+        if (info.isLocal && preCached) active.shouldCleanup = false;
+      }
+      if (!url || hoverPreviewActive !== active) {
+        stopHoverPreview();
+        return;
+      }
+      if (!hoverPreviewAudio) {
+        hoverPreviewAudio = new Audio();
+        hoverPreviewAudio.preload = 'auto';
+        hoverPreviewAudio.volume = 0.45;
+      }
+      const audio = hoverPreviewAudio;
+      audio.onloadedmetadata = () => {
+        if (hoverPreviewActive !== active) return;
+        const duration = Number(audio.duration);
+        let offset = 30;
+        if (Number.isFinite(duration) && duration > 0) {
+          offset = Math.max(0, Math.min(duration * 0.4, duration - (HOVER_PREVIEW_SECONDS + 1)));
+        }
+        try { audio.currentTime = offset; } catch (_) {}
+      };
+      audio.onplaying = () => {
+        if (hoverPreviewActive !== active) return;
+        if (active.hardStop) {
+          clearTimeout(active.hardStop);
+          active.hardStop = null;
+        }
+        if (active.stopTimer) clearTimeout(active.stopTimer);
+        active.stopTimer = setTimeout(() => {
+          if (hoverPreviewActive === active) stopHoverPreview();
+        }, HOVER_PREVIEW_SECONDS * 1000);
+      };
+      audio.onended = () => {
+        if (hoverPreviewActive === active) stopHoverPreview();
+      };
+      audio.onerror = () => {
+        if (hoverPreviewActive === active) stopHoverPreview();
+      };
+      active.hardStop = setTimeout(() => {
+        if (hoverPreviewActive === active) stopHoverPreview();
+      }, 30000);
+      audio.src = url;
+      audio.load();
+      const playResult = audio.play();
+      if (playResult && typeof playResult.catch === 'function') {
+        playResult.catch(() => {
+          if (hoverPreviewActive === active) stopHoverPreview();
+        });
+      }
+    } catch (_) {
+      stopHoverPreview();
+    }
+  }
+
   function createTrackRow(track, idx, currentCanonicalId, context, tracks, container) {
       if (track && track.artist) track.artist = stripYoutubeTopic(track.artist);
       applyTrackRenames(track);
@@ -17624,6 +17803,31 @@ document.addEventListener('DOMContentLoaded', async () => {
       row.dataset.trackId = track.id || '';
       row.dataset.trackTitle = track.title || '';
       row.dataset.trackArtist = track.artist || '';
+
+      row.addEventListener('mouseenter', () => {
+        if (hoverPreviewTimer) clearTimeout(hoverPreviewTimer);
+        hoverPreviewTimer = setTimeout(() => {
+          hoverPreviewTimer = null;
+          startHoverPreview(track, row);
+        }, HOVER_PREVIEW_DELAY_MS);
+      });
+      row.addEventListener('mouseleave', () => {
+        if (hoverPreviewTimer) {
+          clearTimeout(hoverPreviewTimer);
+          hoverPreviewTimer = null;
+        }
+        if (hoverPreviewActive && hoverPreviewActive.row === row) stopHoverPreview();
+      });
+      const rowActions = row.querySelector('.track-row-actions');
+      if (rowActions) {
+        rowActions.addEventListener('mouseenter', () => {
+          if (hoverPreviewTimer) {
+            clearTimeout(hoverPreviewTimer);
+            hoverPreviewTimer = null;
+          }
+          if (hoverPreviewActive && hoverPreviewActive.row === row) stopHoverPreview();
+        });
+      }
 
       row.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
@@ -23579,6 +23783,33 @@ function bindCoverHoldZoom(wrapEl) {
     });
   }
 
+  // Smart shuffle is an independent mode: same random next-track path, but the
+  // picker avoids the current artist and spreads the last few artists apart.
+  function syncSmartShuffleButtons() {
+    const on = Boolean(state.smartShuffle);
+    ['btn-smart-shuffle', 'btn-tvk-smart-shuffle', 'btn-playlist-smart-shuffle'].forEach((id) => {
+      const button = document.getElementById(id);
+      if (button) {
+        button.classList.toggle('active', on);
+        button.setAttribute('aria-pressed', on ? 'true' : 'false');
+      }
+    });
+    if (el.btnShuffle) el.btnShuffle.classList.toggle('active', state.isShuffle);
+  }
+
+  function setSmartShuffle(on) {
+    state.smartShuffle = Boolean(on);
+    localStorage.setItem('riff_smart_shuffle', state.smartShuffle ? '1' : '0');
+    if (!state.smartShuffle) state._smartShuffleArtists = [];
+    syncSmartShuffleButtons();
+  }
+
+  const btnSmartShuffle = document.getElementById('btn-smart-shuffle');
+  if (btnSmartShuffle) {
+    btnSmartShuffle.addEventListener('click', () => setSmartShuffle(!state.smartShuffle));
+  }
+  syncSmartShuffleButtons();
+
   if (el.btnRepeat) {
     el.btnRepeat.classList.toggle('active', state.isRepeat);
     el.btnRepeat.addEventListener('click', () => {
@@ -23589,6 +23820,9 @@ function bindCoverHoldZoom(wrapEl) {
   }
 
   window.toggleShuffle = () => el.btnShuffle && el.btnShuffle.click();
+  window.toggleSmartShuffle = () => setSmartShuffle(!state.smartShuffle);
+  window.setSmartShuffle = setSmartShuffle;
+  window.syncSmartShuffleButtons = syncSmartShuffleButtons;
   window.toggleRepeat = () => el.btnRepeat && el.btnRepeat.click();
 
   function updateVolumeSliderFill() {
@@ -32169,8 +32403,8 @@ function bindCoverHoldZoom(wrapEl) {
   (function initUpdateUI() {
     const api = window.electronAPI;
     const $ = (id) => document.getElementById(id);
-    let currentAppVersion = '0.1.21';
-    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.21' : v;
+    let currentAppVersion = '0.1.22';
+    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.22' : v;
     if (api && api.getAppVersion) {
       api.getAppVersion().then((v) => {
         if (v) {
@@ -32253,7 +32487,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.1.21';
+      if (verEl) verEl.textContent = displayVer || 'v0.1.22';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -35623,7 +35857,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.1.21';
+    let appVer = '0.1.22';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();
@@ -37550,6 +37784,24 @@ function bindCoverHoldZoom(wrapEl) {
     });
   }
 
+  const btnPlaylistSmartShuffle = document.getElementById('btn-playlist-smart-shuffle');
+  if (btnPlaylistSmartShuffle) {
+    btnPlaylistSmartShuffle.classList.toggle('active', state.smartShuffle);
+    btnPlaylistSmartShuffle.setAttribute('aria-pressed', state.smartShuffle ? 'true' : 'false');
+    btnPlaylistSmartShuffle.addEventListener('click', () => {
+      const pl = (state.playlists || []).find(p => p.id === state.currentPlaylistId);
+      const turningOn = !state.smartShuffle;
+      if (typeof window.setSmartShuffle === 'function') window.setSmartShuffle(turningOn);
+      else state.smartShuffle = turningOn;
+      if (!turningOn || !pl || !pl.tracks || pl.tracks.length === 0) return;
+      const list = sortTracksFor('playlist', pl.tracks, pl.id);
+      state.isRadioQueue = false;
+      state.queueHistory = [];
+      const start = list.length > 1 ? Math.floor(Math.random() * list.length) : 0;
+      playTrack(list[start], list, start, 'playlist');
+    });
+  }
+
   const btnPlayPlaylist = el.btnPlayPlaylist || document.getElementById('btn-play-playlist');
   if (btnPlayPlaylist) {
     btnPlayPlaylist.addEventListener('click', () => {
@@ -37558,6 +37810,13 @@ function bindCoverHoldZoom(wrapEl) {
       const list = sortTracksFor('playlist', pl.tracks, pl.id);
       state.isRadioQueue = false;
       state.queueHistory = [];
+      if (state.smartShuffle) {
+        // Smart shuffle on: start somewhere random instead of track 1, then let
+        // the smart picker choose every following track.
+        const start = list.length > 1 ? Math.floor(Math.random() * list.length) : 0;
+        playTrack(list[start], list, start, 'playlist');
+        return;
+      }
       if (state.isShuffle) {
         state.isShuffle = false;
         localStorage.setItem('riff_shuffle', '0');
@@ -40876,6 +41135,42 @@ function bindCoverHoldZoom(wrapEl) {
       closeCacheModal();
     });
   }
+
+  // Auto-clear intervals: default 7 days for the stream cache and 30 for the
+  // offline library, 0 = never. Rust reads the same keys from storage.json on
+  // startup and every 6 hours, so persist each change into the storage map too.
+  function applyAutoClearDays(select, key, fallback) {
+    if (!select) return;
+    const stored = parseInt(localStorage.getItem(key), 10);
+    const value = Number.isFinite(stored) ? stored : fallback;
+    const asString = String(value);
+    if (!Array.from(select.options).some((option) => option.value === asString)) {
+      const option = document.createElement('option');
+      option.value = asString;
+      option.textContent = value === 0 ? 'Never' : `${value} days`;
+      select.appendChild(option);
+    }
+    select.value = asString;
+    if (window.__RIFF_STORAGE_MAP__) {
+      window.__RIFF_STORAGE_MAP__[key] = value;
+      if (window.electronAPI && window.electronAPI.storageSaveBatch) {
+        window.electronAPI.storageSaveBatch(window.__RIFF_STORAGE_MAP__);
+      }
+    }
+    select.addEventListener('change', () => {
+      const days = Math.max(0, parseInt(select.value, 10) || 0);
+      localStorage.setItem(key, String(days));
+      if (window.__RIFF_STORAGE_MAP__) {
+        window.__RIFF_STORAGE_MAP__[key] = days;
+        if (window.electronAPI && window.electronAPI.storageSaveBatch) {
+          window.electronAPI.storageSaveBatch(window.__RIFF_STORAGE_MAP__);
+        }
+      }
+    });
+  }
+
+  applyAutoClearDays(document.getElementById('cache-clear-days'), 'riff_cache_clear_days', 7);
+  applyAutoClearDays(document.getElementById('offline-clear-days'), 'riff_offline_clear_days', 30);
 
   async function updateOfflineStorageUI() {
     const elSize = document.getElementById('offline-library-size');

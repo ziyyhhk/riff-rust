@@ -2070,6 +2070,30 @@ async fn check_cache(State(_state): State<Shared>, Query(q): Query<HashMap<Strin
     json_ok(json!({ "success": true, "cached": cached, "id": id }))
 }
 
+/// Delete hover-preview cache files a while after the renderer previewed them.
+/// Responds immediately; the deletion runs on a background task so a long TTL
+/// never holds the request open.
+async fn preview_cleanup(Json(body): Json<Value>) -> Response {
+    let id = body.get("id").and_then(|v| v.as_str()).unwrap_or_default().trim().to_string();
+    if id.is_empty() {
+        return json_err(StatusCode::BAD_REQUEST, "missing id");
+    }
+    let ttl = body.get("ttlSeconds").and_then(|v| v.as_f64()).unwrap_or(0.0).clamp(0.0, 86_400.0);
+    let target = id.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs_f64(ttl)).await;
+        // Remove every cached variant for this id: find_any_cached_by_id probes
+        // all audio extensions (a superset of find_playable_cached_by_id), so
+        // looping it also clears the transcoded .mp3 sibling of a raw stream file.
+        while let Some(path) = library::find_any_cached_by_id(&target) {
+            if fs::remove_file(&path).is_err() {
+                break;
+            }
+        }
+    });
+    json_ok(json!({ "success": true, "id": id, "ttlSeconds": ttl }))
+}
+
 // --------------------------------------------------------------- download
 
 async fn download(State(state): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
@@ -2230,7 +2254,7 @@ async fn tools_status(State(state): State<Shared>) -> Response {
         "ytDlp": ytdlp.is_some(),
         "ffmpeg": ffmpeg.as_ref().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
         "ffmpegOptional": ffmpeg_optional,
-        "percent": if progress.status == "downloading" { progress.percent } else { 100 },
+        "percent": progress.percent,
         "step": step,
         "error": progress.error,
         "ffmpegError": progress.ffmpeg_error,
@@ -3354,6 +3378,7 @@ pub fn build_router(state: Shared) -> Router {
         .route("/api/offline-delete", get(offline_delete).post(offline_delete))
         .route("/api/clear-offline-library", post(clear_offline_library))
         .route("/api/check-cache", get(check_cache))
+        .route("/api/preview-cleanup", post(preview_cleanup))
         .route("/api/download", get(download).post(download))
         .route("/api/tools/status", get(tools_status))
         .route("/api/tools-status", get(tools_status))
@@ -3445,6 +3470,14 @@ pub fn serve(listener: std::net::TcpListener, state: Shared) {
         };
         runtime.block_on(async move {
             util::log_line("INFO", "serve runtime up");
+            // Auto-purge cache/offline library: once at startup, then every 6 h.
+            // Blocking disk work stays off the runtime workers.
+            tokio::spawn(async {
+                loop {
+                    let _ = tokio::task::spawn_blocking(util::auto_clean_tick).await;
+                    tokio::time::sleep(Duration::from_secs(6 * 3600)).await;
+                }
+            });
             let listener = match TcpListener::from_std(listener) {
                 Ok(l) => {
                     util::log_line("INFO", "listener converted");
