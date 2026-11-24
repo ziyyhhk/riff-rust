@@ -528,7 +528,7 @@
 <script>
 (function () {
   var ua = navigator.userAgent || '';
-  var mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
+  var mobile = window.__RIFF_MOBILE__ || /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
     (window.matchMedia && window.matchMedia('(max-width: 700px)').matches) ||
     navigator.maxTouchPoints > 0;
   if (mobile) document.body.classList.add('phone-ui');

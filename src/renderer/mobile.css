@@ -62,61 +62,34 @@ body.phone-ui .main-content {
 }
 body.phone-ui .content-view { padding: 0 !important; }
 
-/* --- bottom nav: reuse the existing sidebar as the nav strip --- */
-body.phone-ui .sidebar {
+/* --- bottom nav: dedicated compact bar, like a music app --- */
+body.phone-ui .sidebar,
+body.phone-ui #sidebar { display: none !important; }
+body.phone-ui .mobile-bottom-nav {
+  display: flex !important;
   position: fixed !important;
   left: 0 !important;
   right: 0 !important;
-  top: auto !important;
   bottom: 0 !important;
-  width: 100% !important;
-  height: calc(56px + env(safe-area-inset-bottom, 0px)) !important;
-  min-height: 0 !important;
-  flex-direction: row !important;
-  padding: 0 2px env(safe-area-inset-bottom, 0px) !important;
-  border-radius: 0 !important;
+  height: calc(60px + env(safe-area-inset-bottom, 0px)) !important;
+  padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+  border-top: 1px solid rgba(255,255,255,.06) !important;
   z-index: 3000 !important;
 }
-body.phone-ui .sidebar-nav {
-  flex-direction: row !important;
-  justify-content: space-around !important;
-  align-items: stretch !important;
-  width: 100% !important;
-}
-body.phone-ui .sidebar .nav-item {
-  flex: 1 1 0 !important;
-  min-width: 40px !important;
-  max-width: 64px !important;
-  min-height: 44px !important;
-  width: auto !important;
-}
-body.phone-ui .sidebar .nav-item-label,
-body.phone-ui .nav-active-indicator,
-body.phone-ui .sidebar .rail-action-group {
-  display: none !important;
-}
-body.phone-ui .sb-bottom-icon-bar {
-  flex-direction: row !important;
-  width: auto !important;
-}
 
-/* The extra explicit bottom nav in index.html is hidden because the existing
-   sidebar already provides navigation; keep it hidden here to avoid duplicates. */
-body.phone-ui .mobile-bottom-nav { display: none !important; }
-
-/* --- compact player above the nav --- */
+/* --- mini player above the nav --- */
 body.phone-ui .playbar {
   position: fixed !important;
   left: 8px !important;
   right: 8px !important;
   top: auto !important;
-  bottom: calc(62px + env(safe-area-inset-bottom, 0px)) !important;
+  bottom: calc(68px + env(safe-area-inset-bottom, 0px)) !important;
   width: auto !important;
-  height: 64px !important;
+  height: 62px !important;
   min-height: 0 !important;
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) auto !important;
-  gap: 6px !important;
+  gap: 4px !important;
   padding: 6px 10px !important;
   border-radius: 16px !important;
   z-index: 2990 !important;
@@ -125,31 +98,44 @@ body.phone-ui .playbar-right,
 body.phone-ui .playbar .time-label,
 body.phone-ui .playbar .scrubber-track-container,
 body.phone-ui #btn-shuffle,
-body.phone-ui #btn-repeat,
 body.phone-ui #btn-smart-shuffle,
-body.phone-ui #btn-toggle-fav,
-body.phone-ui #btn-playbar-more {
+body.phone-ui #btn-repeat,
+body.phone-ui #btn-prev,
+body.phone-ui #btn-next,
+body.phone-ui #btn-edit-current-track,
+body.phone-ui #btn-playbar-share,
+body.phone-ui #btn-toggle-queue-panel,
+body.phone-ui #btn-playbar-karaoke {
   display: none !important;
+}
+body.phone-ui #btn-toggle-fav,
+body.phone-ui #btn-playbar-more,
+body.phone-ui #btn-play-pause {
+  display: inline-flex !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
 }
 body.phone-ui .playbar-left { min-width: 0 !important; }
 body.phone-ui .playbar-left .artwork-wrapper,
 body.phone-ui #playbar-artwork-wrapper {
-  width: 44px !important;
-  height: 44px !important;
-  min-width: 44px !important;
+  width: 46px !important;
+  height: 46px !important;
+  min-width: 46px !important;
   border-radius: 10px !important;
 }
 body.phone-ui .track-title,
 body.phone-ui .track-artist {
   font-size: 13px !important;
-  max-width: 42vw;
+  max-width: 52vw !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
 }
-body.phone-ui .playback-controls .control-btn,
-body.phone-ui .tvk-controls .control-btn {
-  min-width: 42px !important;
-  min-height: 42px !important;
+body.phone-ui .btn-play-pause {
+  width: 44px !important;
+  height: 44px !important;
+  min-width: 44px !important;
 }
-
 /* --- touch-friendly rows --- */
 body.phone-ui .track-row {
   min-height: 58px !important;
@@ -279,3 +265,28 @@ body.phone-ui .pane h2 {
 body.phone-ui .btn {
   min-height: 44px !important;
 }
+
+/* --- Spotify-ish spacing and sizing on phones --- */
+body.phone-ui .section-title,
+body.phone-ui .sp-section-title,
+body.phone-ui .home-section-title,
+body.phone-ui h2 { font-size: 20px !important; line-height: 1.25 !important; }
+body.phone-ui .quick-tile,
+body.phone-ui .sp-quick-tile,
+body.phone-ui .home-tile,
+body.phone-ui .sp-tile {
+  min-height: 64px !important;
+  padding: 10px !important;
+  font-size: 13px !important;
+}
+body.phone-ui .liked-tile,
+body.phone-ui .liked-songs-tile,
+body.phone-ui .home-liked-card {
+  min-height: 64px !important;
+}
+body.phone-ui .main-content { padding-left: 12px !important; padding-right: 12px !important; }
+body.phone-ui .top-nav { padding-left: 12px !important; padding-right: 12px !important; }
+body.phone-ui .home-next-to-search .search-box-wrapper { margin-left: 0 !important; }
+body.phone-ui #home-btn,
+body.phone-ui .home-nav-btn,
+body.phone-ui .top-nav .home-btn { display: none !important; }

@@ -379,9 +379,16 @@ pub fn run() {
     tools::ensure_tools(app_state.clone());
     util::log_line("INFO", &format!("embedded API listening on 127.0.0.1:{port}"));
 
-    // Synchronous boot data for the renderer (read before any IPC round-trip)
+    // Synchronous boot data for the renderer (read before any IPC round-trip).
+    // The mobile flag is injected here so the renderer never has to guess from
+    // a user agent (WebView2/Android UAs are not reliable for this).
+    let mobile_flag = if cfg!(any(target_os = "android", target_os = "ios")) {
+        "window.__RIFF_MOBILE__=true;"
+    } else {
+        ""
+    };
     let boot = format!(
-        "window.__RIFF_BOOT__ = {{ token: \"{}\", port: {}, storage: {} }};",
+        "{mobile_flag}window.__RIFF_BOOT__ = {{ token: \"{}\", port: {}, storage: {} }};",
         token,
         port,
         serde_json::to_string(&storage_snapshot).unwrap_or_else(|_| "{}".into())

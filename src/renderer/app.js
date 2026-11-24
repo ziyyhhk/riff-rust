@@ -23343,6 +23343,18 @@ function updateNavIndicator(animate) {
     }
   });
 
+  document.querySelectorAll('.mobile-nav-btn[data-mobile-view]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const view = btn.dataset.mobileView;
+      if (view === 'search') {
+        const input = document.getElementById('search-input');
+        if (input) { input.focus(); input.select(); }
+        return;
+      }
+      if (typeof switchView === 'function') switchView(view);
+    });
+  });
+
   if (el.navFavorites) el.navFavorites.addEventListener('click', () => switchView('favorites'));
   if (el.navAlbums) el.navAlbums.addEventListener('click', () => switchView('albums'));
   if (el.navLocal) el.navLocal.addEventListener('click', () => switchView('local'));
@@ -31704,7 +31716,7 @@ function bindCoverHoldZoom(wrapEl) {
   // breakpoint, which hides the whole shell on a phone.
   const phoneMQ = window.matchMedia('(max-width: 600px)');
   const touchUI = window.matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0;
-  const phoneUA = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+  const phoneUA = window.__RIFF_MOBILE__ || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
   function isPhoneUI() { return phoneUA || phoneMQ.matches || (touchUI && window.innerWidth <= 700); }
   function syncPhoneUI() {
     const on = isPhoneUI();
