@@ -17665,20 +17665,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!active) return;
     if (active.stopTimer) clearTimeout(active.stopTimer);
     if (active.hardStop) clearTimeout(active.hardStop);
-    if (hoverPreviewAudio) {
-      try { hoverPreviewAudio.pause(); } catch (_) {}
-      try {
-        hoverPreviewAudio.removeAttribute('src');
-        hoverPreviewAudio.load();
-      } catch (_) {}
-    }
-    if (active.row) active.row.classList.remove('previewing');
-    if (active.shouldCleanup && active.cleanupId && state.serverPort) {
-      fetch(`http://127.0.0.1:${state.serverPort}/api/preview-cleanup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: active.cleanupId, ttlSeconds: HOVER_PREVIEW_TTL_SECONDS })
-      }).catch(() => {});
+    if (active.fadeTimer) { clearInterval(active.fadeTimer); active.fadeTimer = null; }
+    const audio = hoverPreviewAudio;
+    const finishStop = () => {
+      if (audio) {
+        try { audio.pause(); } catch (_) {}
+        try { audio.removeAttribute('src'); audio.load(); } catch (_) {}
+        audio.volume = 0.45;
+      }
+      if (active.row) active.row.classList.remove('previewing');
+      if (active.shouldCleanup && active.cleanupId && state.serverPort) {
+        fetch(`http://127.0.0.1:${state.serverPort}/api/preview-cleanup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: active.cleanupId, ttlSeconds: HOVER_PREVIEW_TTL_SECONDS })
+        }).catch(() => {});
+      }
+    };
+    if (audio && !audio.paused) {
+      const startVol = audio.volume || 0.45;
+      const steps = 8;
+      const stepMs = 18;
+      let i = 0;
+      active.fadeTimer = setInterval(() => {
+        i++;
+        const v = startVol * (1 - i / steps);
+        if (i >= steps || v <= 0.001) {
+          clearInterval(active.fadeTimer);
+          active.fadeTimer = null;
+          if (hoverPreviewAudio === audio) audio.volume = 0;
+          finishStop();
+        } else {
+          if (hoverPreviewAudio === audio) audio.volume = v;
+        }
+      }, stepMs);
+    } else {
+      finishStop();
     }
   }
 
@@ -17742,9 +17764,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!hoverPreviewAudio) {
         hoverPreviewAudio = new Audio();
         hoverPreviewAudio.preload = 'auto';
-        hoverPreviewAudio.volume = 0.45;
+        hoverPreviewAudio.volume = 0;
       }
       const audio = hoverPreviewAudio;
+      audio.volume = 0;
       audio.onloadedmetadata = () => {
         if (hoverPreviewActive !== active) return;
         const duration = Number(audio.duration);
@@ -17764,6 +17787,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         active.stopTimer = setTimeout(() => {
           if (hoverPreviewActive === active) stopHoverPreview();
         }, HOVER_PREVIEW_SECONDS * 1000);
+        // Fade in
+        if (active.fadeTimer) { clearInterval(active.fadeTimer); active.fadeTimer = null; }
+        const targetVol = 0.45;
+        const stepsIn = 10;
+        const stepMsIn = 20;
+        let j = 0;
+        active.fadeTimer = setInterval(() => {
+          if (hoverPreviewActive !== active) { clearInterval(active.fadeTimer); active.fadeTimer = null; return; }
+          j++;
+          const v = targetVol * (j / stepsIn);
+          if (j >= stepsIn) {
+            clearInterval(active.fadeTimer);
+            active.fadeTimer = null;
+            if (hoverPreviewAudio === audio) audio.volume = targetVol;
+          } else {
+            if (hoverPreviewAudio === audio) audio.volume = v;
+          }
+        }, stepMsIn);
       };
       audio.onended = () => {
         if (hoverPreviewActive === active) stopHoverPreview();
