@@ -11,6 +11,7 @@
   },
   "license": "MIT",
   "scripts": {
+    "tauri": "tauri",
     "assemble": "node scripts/assemble.mjs",
     "dev": "npm run assemble && npx tauri dev",
     "build": "npm run assemble && npx tauri build",
