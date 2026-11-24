@@ -1,0 +1,219 @@
+/* Riff Rust phone layout. Loaded after styles.css and the runtime injected
+   sheets, so body.phone-ui rules win. JS adds .phone-ui on small/coarse screens. */
+
+.mobile-bottom-nav { display: none; }
+
+body.phone-ui {
+  --playbar-space: 0px;
+  overscroll-behavior: none;
+}
+
+body.phone-ui .titlebar-controls,
+body.phone-ui .window-controls,
+body.phone-ui .titlebar-drag .app-logo,
+body.phone-ui .sidebar-resize-edge,
+body.phone-ui .rail-drawer,
+body.phone-ui #rail-drawer,
+body.phone-ui .sidebar-library-wrap,
+body.phone-ui .right-panel,
+body.phone-ui #right-panel,
+body.phone-ui .platform-switch-container,
+body.phone-ui #top-nav-profile-actions,
+body.phone-ui .sb-import-promo-card,
+body.phone-ui .playlist-recs-section,
+body.phone-ui .volume-control-group,
+body.phone-ui .visualizer-container,
+body.phone-ui #mini-lyrics-container,
+body.phone-ui .mini-player,
+body.phone-ui #mini-player {
+  display: none !important;
+}
+
+/* --- stacked shell --- */
+body.phone-ui .app-layout {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  gap: 0 !important;
+}
+body.phone-ui .top-nav {
+  margin: 0 !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 56px !important;
+  padding: 8px 12px calc(8px + env(safe-area-inset-top, 0px)) !important;
+  gap: 8px !important;
+  flex-wrap: nowrap !important;
+}
+body.phone-ui #main-content,
+body.phone-ui .main-content {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  height: auto !important;
+  border-radius: 0 !important;
+  padding: 12px 10px calc(152px + env(safe-area-inset-bottom, 0px)) !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+body.phone-ui .content-view { padding: 0 !important; }
+
+/* --- bottom nav: reuse the existing sidebar as the nav strip --- */
+body.phone-ui .sidebar {
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  top: auto !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: calc(56px + env(safe-area-inset-bottom, 0px)) !important;
+  min-height: 0 !important;
+  flex-direction: row !important;
+  padding: 0 2px env(safe-area-inset-bottom, 0px) !important;
+  border-radius: 0 !important;
+  z-index: 3000 !important;
+}
+body.phone-ui .sidebar-nav {
+  flex-direction: row !important;
+  justify-content: space-around !important;
+  align-items: stretch !important;
+  width: 100% !important;
+}
+body.phone-ui .sidebar .nav-item {
+  flex: 1 1 0 !important;
+  min-width: 40px !important;
+  max-width: 64px !important;
+  min-height: 44px !important;
+  width: auto !important;
+}
+body.phone-ui .sidebar .nav-item-label,
+body.phone-ui .nav-active-indicator,
+body.phone-ui .sidebar .rail-action-group {
+  display: none !important;
+}
+body.phone-ui .sb-bottom-icon-bar {
+  flex-direction: row !important;
+  width: auto !important;
+}
+
+/* The extra explicit bottom nav in index.html is hidden because the existing
+   sidebar already provides navigation; keep it hidden here to avoid duplicates. */
+body.phone-ui .mobile-bottom-nav { display: none !important; }
+
+/* --- compact player above the nav --- */
+body.phone-ui .playbar {
+  position: fixed !important;
+  left: 8px !important;
+  right: 8px !important;
+  top: auto !important;
+  bottom: calc(62px + env(safe-area-inset-bottom, 0px)) !important;
+  width: auto !important;
+  height: 64px !important;
+  min-height: 0 !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: 6px !important;
+  padding: 6px 10px !important;
+  border-radius: 16px !important;
+  z-index: 2990 !important;
+}
+body.phone-ui .playbar-right,
+body.phone-ui .playbar .time-label,
+body.phone-ui .playbar .scrubber-track-container,
+body.phone-ui #btn-shuffle,
+body.phone-ui #btn-repeat,
+body.phone-ui #btn-smart-shuffle,
+body.phone-ui #btn-toggle-fav,
+body.phone-ui #btn-playbar-more {
+  display: none !important;
+}
+body.phone-ui .playbar-left { min-width: 0 !important; }
+body.phone-ui .playbar-left .artwork-wrapper,
+body.phone-ui #playbar-artwork-wrapper {
+  width: 44px !important;
+  height: 44px !important;
+  min-width: 44px !important;
+  border-radius: 10px !important;
+}
+body.phone-ui .track-title,
+body.phone-ui .track-artist {
+  font-size: 13px !important;
+  max-width: 42vw;
+}
+body.phone-ui .playback-controls .control-btn,
+body.phone-ui .tvk-controls .control-btn {
+  min-width: 42px !important;
+  min-height: 42px !important;
+}
+
+/* --- touch-friendly rows --- */
+body.phone-ui .track-row {
+  min-height: 58px !important;
+  padding: 6px 8px !important;
+  gap: 8px !important;
+}
+body.phone-ui .track-row-actions,
+body.phone-ui .track-row .track-row-actions {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+body.phone-ui .track-row-actions .btn-icon-pill {
+  width: 32px !important;
+  min-width: 32px !important;
+  height: 32px !important;
+}
+body.phone-ui .track-row-col-album,
+body.phone-ui .track-row-col-plays,
+body.phone-ui .track-row-col-date {
+  display: none !important;
+}
+body.phone-ui :is(#favorites-tracks-list, #playlist-tracks-list, .tracks-list) .track-row {
+  grid-template-columns: 28px 44px minmax(0, 1fr) auto !important;
+}
+
+/* --- grids collapse --- */
+body.phone-ui :is(.search-grid, .home-grid, .spotify-grid, .sp-tile-grid,
+  .search-albums-row, .saved-albums-grid, .playlist-grid, .artist-grid,
+  .featured-mixes-grid, .sp-quick, .album-layout, .playlist-detail-header) {
+  grid-template-columns: minmax(0, 1fr) !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+}
+body.phone-ui .sp-tile,
+body.phone-ui .search-album-card { min-width: 0 !important; }
+body.phone-ui .home-hero { min-height: 320px !important; }
+
+/* --- settings + dialogs --- */
+body.phone-ui #view-settings { padding: 8px !important; }
+body.phone-ui #view-settings .settings-nav {
+  flex: 0 0 auto !important;
+  width: 100% !important;
+  flex-direction: row !important;
+  overflow-x: auto !important;
+  max-height: none !important;
+}
+body.phone-ui .settings-layout,
+body.phone-ui .settings-shell { display: block !important; }
+body.phone-ui .settings-pane { width: 100% !important; }
+body.phone-ui :is(.settings-card, .dialog-card, .modal-card, .track-art-modal-card) {
+  width: calc(100vw - 24px) !important;
+  max-width: calc(100vw - 24px) !important;
+  padding: 16px !important;
+  max-height: calc(100dvh - 24px) !important;
+  overflow-y: auto !important;
+  border-radius: 18px !important;
+}
+
+/* --- TV player: no hover dependency --- */
+body.phone-ui .tvk-top-hover-zone { display: none !important; }
+body.phone-ui .tvk-controls,
+body.phone-ui #btn-tvk-settings { opacity: 1 !important; pointer-events: auto !important; }
+
+/* Boot skeleton on phones */
+body.phone-ui #boot-skeleton .bs-grid { grid-template-columns: 1fr !important; }
+body.phone-ui #boot-skeleton .bs-search-pill { max-width: calc(100vw - 32px) !important; }
+body.phone-ui #boot-skeleton .bs-bottom { height: 140px !important; }

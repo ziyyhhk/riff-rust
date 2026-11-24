@@ -17918,20 +17918,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       row.dataset.trackTitle = track.title || '';
       row.dataset.trackArtist = track.artist || '';
 
-      row.addEventListener('mouseenter', () => {
-        if (hoverPreviewTimer) clearTimeout(hoverPreviewTimer);
-        hoverPreviewTimer = setTimeout(() => {
-          hoverPreviewTimer = null;
-          startHoverPreview(track, row);
-        }, HOVER_PREVIEW_DELAY_MS);
-      });
-      row.addEventListener('mouseleave', () => {
-        if (hoverPreviewTimer) {
-          clearTimeout(hoverPreviewTimer);
-          hoverPreviewTimer = null;
-        }
-        if (hoverPreviewActive && hoverPreviewActive.row === row) stopHoverPreview();
-      });
+      if (!window.touchUI) {
+        row.addEventListener('mouseenter', () => {
+          if (hoverPreviewTimer) clearTimeout(hoverPreviewTimer);
+          hoverPreviewTimer = setTimeout(() => {
+            hoverPreviewTimer = null;
+            startHoverPreview(track, row);
+          }, HOVER_PREVIEW_DELAY_MS);
+        });
+        row.addEventListener('mouseleave', () => {
+          if (hoverPreviewTimer) {
+            clearTimeout(hoverPreviewTimer);
+            hoverPreviewTimer = null;
+          }
+          if (hoverPreviewActive && hoverPreviewActive.row === row) stopHoverPreview();
+        });
+      }
       const rowActions = row.querySelector('.track-row-actions');
       if (rowActions) {
         rowActions.addEventListener('mouseenter', () => {
@@ -31698,11 +31700,29 @@ function bindCoverHoldZoom(wrapEl) {
   }
   if (window.electronAPI && window.electronAPI.onWelcomeResult) window.electronAPI.onWelcomeResult((d) => applyWelcomeResult(d));
 
+  // Phone UI: an explicit mode instead of relying on the desktop "mini player"
+  // breakpoint, which hides the whole shell on a phone.
+  const phoneMQ = window.matchMedia('(max-width: 600px)');
+  const touchUI = window.matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+  function isPhoneUI() { return phoneMQ.matches || (touchUI && window.innerWidth <= 700); }
+  function syncPhoneUI() {
+    const on = isPhoneUI();
+    document.body.classList.toggle('phone-ui', on);
+    if (on) document.body.classList.remove('mini', 'mini-lyrics-on');
+  }
+  syncPhoneUI();
+  if (phoneMQ.addEventListener) phoneMQ.addEventListener('change', syncPhoneUI);
+  else if (phoneMQ.addListener) phoneMQ.addListener(syncPhoneUI);
+  window.isPhoneUI = isPhoneUI;
+  window.touchUI = touchUI;
+
   let compactResizeTimer = null;
   function checkCompactLayout() {
+    syncPhoneUI();
     if (compactResizeTimer) clearTimeout(compactResizeTimer);
     compactResizeTimer = setTimeout(() => {
       compactResizeTimer = null;
+      if (isPhoneUI()) return;
       const isMini = window.innerWidth <= 520;
       const alreadyMini = document.body.classList.contains('mini');
       if (isMini === alreadyMini) return;

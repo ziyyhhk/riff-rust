@@ -1,4 +1,4 @@
-﻿#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+﻿#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod commands;
 mod discord_rpc;
@@ -325,6 +325,22 @@ pub(crate) fn trim_working_sets() {
 #[cfg(not(windows))]
 pub(crate) fn trim_working_sets() {}
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn add_shortcut_plugin(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(|app, shortcut, event| {
+                commands::handle_shortcut(app, shortcut, event)
+            })
+            .build(),
+    )
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn add_shortcut_plugin(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder
+}
+
 fn main() {
     util::ensure_dirs();
     let cache_freed = util::prune_cache_limit();
@@ -358,6 +374,7 @@ fn main() {
     let token = util::random_token();
     let app_state = Arc::new(AppState::new(port, token.clone(), download_dir));
     server::serve(listener, app_state.clone());
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     tools::ensure_tools(app_state.clone());
     util::log_line("INFO", &format!("embedded API listening on 127.0.0.1:{port}"));
 
@@ -369,15 +386,8 @@ fn main() {
         serde_json::to_string(&storage_snapshot).unwrap_or_else(|_| "{}".into())
     );
 
-    let result = tauri::Builder::default()
+    let result = add_shortcut_plugin(tauri::Builder::default())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, shortcut, event| {
-                    commands::handle_shortcut(app, shortcut, event)
-                })
-                .build(),
-        )
         .manage(app_state.clone())
         .invoke_handler(tauri::generate_handler![
             commands::get_server_port,
@@ -464,6 +474,14 @@ fn main() {
         .setup(move |app| {
             let start_url = if first_run { "welcome.html" } else { "index.html" };
             let bg = if first_run { tauri::window::Color(141, 94, 242, 255) } else { tauri::window::Color(0, 0, 0, 255) };
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            let mobile = true;
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            let mobile = false;
+
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            let (win_w, win_h, win_x, win_y, win_maximized) = (400.0, 800.0, 0.0, 0.0, false);
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             let (win_w, win_h, win_x, win_y, win_maximized) = startup_geometry(app);
             // Cap WebView2 at one renderer process for this single static page.
             // Keep wry's default feature disables explicitly (this flag overrides them).
@@ -477,11 +495,11 @@ fn main() {
                 .title("Riff Rust")
                 .inner_size(win_w, win_h)
                 .position(win_x, win_y)
-                .min_inner_size(800.0, 540.0)
-                .decorations(false)
-                .resizable(true)
-                .visible(false)
-                .maximized(win_maximized)
+                .min_inner_size(if mobile { 0.0 } else { 800.0 }, if mobile { 0.0 } else { 540.0 })
+                .decorations(!mobile)
+                .resizable(!mobile)
+                .visible(mobile)
+                .maximized(win_maximized && !mobile)
                 .background_color(bg)
                 .initialization_script(&boot)
                 .on_page_load(|window, payload| {
@@ -499,6 +517,8 @@ fn main() {
             set_webview_memory_level(&window);
 
             // If the page never finishes loading, do not leave an invisible app running.
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
             let fallback = window.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_secs(3));
@@ -506,8 +526,11 @@ fn main() {
                     let _ = fallback.show();
                 }
             });
+            }
 
-            // Tray icon + menu (Show / Quit)
+            // Tray icon + menu (Show / Quit) — desktop only (Tauri's menu/tray
+            // modules do not exist on mobile targets).
+            #[cfg(desktop)]
             {
                 let icon = tauri::image::Image::new_owned(include_bytes!("../icons/tray-32x32.rgba").to_vec(), 32, 32);
                 let show_i = tauri::menu::MenuItem::with_id(app, "show", "Show Riff Rust", true, None::<&str>)?;
@@ -549,6 +572,7 @@ fn main() {
 
             // Register media keys / custom global shortcuts (renderer confirms audio readiness later).
             let shared = app.state::<Shared>();
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             commands::sync_hotkeys(app.handle(), &shared);
             Ok(())
         })

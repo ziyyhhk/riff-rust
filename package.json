@@ -11,7 +11,7 @@
   },
   "license": "MIT",
   "scripts": {
-    "assemble": "powershell -ExecutionPolicy Bypass -File scripts/assemble.ps1",
+    "assemble": "node scripts/assemble.mjs",
     "dev": "npm run assemble && npx tauri dev",
     "build": "npm run assemble && npx tauri build",
     "clean": "powershell -ExecutionPolicy Bypass -File scripts/clean.ps1",

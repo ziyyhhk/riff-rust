@@ -10,6 +10,8 @@
 //! A single thread now peeks for incoming packets and writes only when the
 //! pipe is idle.
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod desktop {
 use std::ffi::c_void;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -505,3 +507,23 @@ fn send_presence(file: &mut File, activity: &Value, connected: &AtomicBool) -> b
         }
     }
 }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+mod mobile {
+    pub struct DiscordRpc;
+    impl DiscordRpc {
+        pub fn new() -> Self { Self }
+        pub fn set_enabled(&self, _: bool) {}
+        pub fn is_enabled(&self) -> bool { false }
+        pub fn is_connected(&self) -> bool { false }
+        pub fn set_activity(&self, _: serde_json::Value) {}
+        pub fn clear_activity(&self) {}
+        pub fn reconnect(&self) {}
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub use desktop::DiscordRpc;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub use mobile::DiscordRpc;

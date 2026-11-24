@@ -25,7 +25,11 @@ pub fn bootstrap_pointer_path() -> PathBuf {
         }
         PathBuf::from("Riff Rust Boot/data-dir.json")
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "android")]
+    {
+        PathBuf::from("/data/user/0/io.github.rootscripts.riffrust/files/boot")
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "android")))]
     {
         if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
             return PathBuf::from(xdg).join("riff-rust-boot/data-dir.json");
@@ -58,7 +62,11 @@ pub fn default_data_dir() -> PathBuf {
         }
         PathBuf::from("Riff Rust")
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "android")]
+    {
+        PathBuf::from("/data/user/0/io.github.rootscripts.riffrust/files/data")
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "android")))]
     {
         if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
             return PathBuf::from(xdg).join("Riff Rust");

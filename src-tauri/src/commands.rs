@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_global_shortcut::{
     Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutEvent, ShortcutState,
 };
@@ -13,12 +14,14 @@ type Shared = Arc<AppState>;
 
 // -------------------------------------------------------- global shortcuts
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn command_or_control(modifiers: Modifiers) -> bool {
     modifiers.contains(Modifiers::CONTROL) || modifiers.contains(Modifiers::SUPER)
 }
 
 /// Central handler for media keys and the app's global shortcuts. Mirrors upstream:
 /// media keys send `media-command`, custom accelerators send `media-control`.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn handle_shortcut(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
     if event.state != ShortcutState::Pressed {
         return;
@@ -67,6 +70,7 @@ pub fn handle_shortcut(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEven
 
 /// Re-register everything after a settings change. Unregistering first makes this
 /// idempotent and avoids "already registered" errors when the renderer calls twice.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn sync_hotkeys(app: &AppHandle, state: &AppState) {
     let shortcuts = app.global_shortcut();
     if let Err(e) = shortcuts.unregister_all() {
@@ -108,6 +112,9 @@ pub fn sync_hotkeys(app: &AppHandle, state: &AppState) {
         }
     }
 }
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn sync_hotkeys(_app: &AppHandle, _state: &AppState) {}
 
 // ---------------------------------------------------------------- windowing
 

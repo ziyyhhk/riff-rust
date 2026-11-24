@@ -9,6 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Text:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css?v=0.1.22">
   <link rel="stylesheet" href="updater.css?v=0.1.22">
+  <link rel="stylesheet" href="mobile.css?v=0.1.22">
   <script>if (/Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '')) document.documentElement.classList.add('platform-darwin');</script>
   <style id="tg-account-critical-css">
   #settings-nav-account.settings-account-nav-btn {
@@ -3320,6 +3321,30 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
     <button type="button" class="btn-outline-pill" id="btn-bulk-remove" style="height: 32px; padding: 0 14px; font-size: 12px; display: none;" data-i18n>Remove</button>
     <button type="button" class="btn-icon-pill" id="btn-bulk-clear" title="Clear selection" style="width: 28px; height: 28px;">✕</button>
   </div>
+
+  <!-- Mobile-only bottom navigation; hidden on desktop by CSS -->
+  <nav class="mobile-bottom-nav" id="mobile-bottom-nav" aria-label="Mobile navigation">
+    <button type="button" class="mobile-nav-btn active" data-mobile-view="discover" title="Home">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4,19V10Q4,9.52 4.21,9.1Q4.43,8.67 4.8,8.4l6-4.5Q11.33,3.5 12,3.5t1.2,0.4l6,4.5q0.38,0.28 0.59,0.7Q20,9.52 20,10v9q0,0.82-0.59,1.41T18,21H15q-0.42,0-0.71-0.29Q14,20.43 14,20V15q0-0.43-0.29-0.71T13,14H11q-0.42,0-0.71,0.29T10,15v5q0,0.43-0.29,0.71T9,21H6q-0.82,0-1.41-0.59T4,19Z"/></svg>
+      <span>Home</span>
+    </button>
+    <button type="button" class="mobile-nav-btn" data-mobile-view="search" title="Search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+      <span>Search</span>
+    </button>
+    <button type="button" class="mobile-nav-btn" data-mobile-view="favorites" title="Liked">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+      <span>Liked</span>
+    </button>
+    <button type="button" class="mobile-nav-btn" data-mobile-view="local" title="My files">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      <span>Files</span>
+    </button>
+    <button type="button" class="mobile-nav-btn" data-mobile-view="settings" title="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+      <span>Settings</span>
+    </button>
+  </nav>
 
   <footer class="playbar" id="playbar">
     <canvas id="bottom-visualizer" class="playbar-bg-visualizer"></canvas>
