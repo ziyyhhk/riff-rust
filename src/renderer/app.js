@@ -2617,12 +2617,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       state.serverPort = await window.electronAPI.getServerPort();
       refreshCachedTrackIds();
-      if (typeof window.syncImportedLocalTracks === 'function') {
-        window.syncImportedLocalTracks().then(() => {
-          if (typeof window.refreshNavBadges === 'function') window.refreshNavBadges();
-          if (typeof window.renderSidebarLibraryFeed === 'function') window.renderSidebarLibraryFeed();
-        }).catch(() => {});
-      }
     } catch (e) {
       console.warn('Failed to get server port:', e);
     }
@@ -4865,6 +4859,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (state.currentView === 'favorites' && typeof renderFavoritesView === 'function') renderFavoritesView();
       if (state.currentView === 'playlist-detail' && typeof renderPlaylistDetailView === 'function' && state.selectedPlaylist) renderPlaylistDetailView(state.selectedPlaylist);
       if (state.currentView === 'history' && typeof renderHistoryView === 'function') renderHistoryView();
+
+      if (targetTrack && (targetTrack.platform === 'local' || String(targetTrack.id || '').startsWith('riff-') || String(targetTrack.id || '').startsWith('local_'))) {
+        updateArr(state.localFiles);
+        updateArr(state.localTracks);
+        const localJson = JSON.stringify(state.localFiles || []);
+        localStorage.setItem('riff_local_files', localJson);
+        localStorage.setItem('devsize_local_files', localJson);
+        localStorage.setItem('riff_local_tracks', localJson);
+        localStorage.setItem('devsize_local_tracks', localJson);
+        fetch(`http://127.0.0.1:${state.serverPort}/api/library-update`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: targetTrack.id, title: newTitle, artist: newArtist, album: newAlbum })
+        }).catch(() => {});
+        if (typeof renderLocalFiles === 'function') renderLocalFiles();
+      }
 
       sendStateToServer();
       sendDiscordRpcUpdate(state.currentTrack, state.isPlaying);
@@ -17020,6 +17030,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       },
       {
+        id: 'edit-details',
+        label: 'Edit title / artist',
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+        action: () => {
+          state.renamingTrack = track;
+          if (typeof openTrackRenameDialog === 'function') openTrackRenameDialog();
+        }
+      },
+      {
         id: 'playlist',
         label: 'Add to playlist',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
@@ -20357,9 +20376,6 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
   let localRescanDone = false;
 
   async function renderLocalFiles(forceFetch = false) {
-    if (forceFetch && typeof syncImportedLocalTracks === 'function') {
-      await syncImportedLocalTracks();
-    }
     if (!Array.isArray(state.localFiles)) {
       state.localFiles = safeArray('riff_local_files');
     }
@@ -20651,7 +20667,7 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
         }
       }
       await Promise.all([worker(), worker()]);
-
+      syncImportedLocalTracks(items);
       await renderLocalView(true);
       showToast(`Added ${items.length} tracks`);
     } catch (e) {
@@ -20835,28 +20851,25 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
     } catch (_) {}
   })();
 
-  // Imported tracks live in library.json (backend), while Add files/folder
-  // populate localStorage. Merge the imported ones into the local library so
-  // "My files" shows everything regardless of which import path was used.
-  async function syncImportedLocalTracks() {
-    if (!state.serverPort) return;
-    try {
-      const res = await fetch(`http://127.0.0.1:${state.serverPort}/api/offline-library`);
-      const data = await res.json();
-      const imported = (data && Array.isArray(data.tracks))
-        ? data.tracks.filter(t => t && t.isLocal && !t.isCached)
-        : [];
-      if (!imported.length) return;
-      const byKey = new Map();
-      [...(state.localFiles || []), ...(state.localTracks || []), ...imported].forEach(t => {
-        const key = String(t.id || t.path || t.filePath || t.url || t.title || '');
-        if (key && !byKey.has(key)) byKey.set(key, t);
-      });
-      state.localFiles = Array.from(byKey.values());
-      state.localTracks = state.localFiles;
-    } catch (_) {}
+  // Add only the tracks from the current import to My files. Pulling the whole
+  // backend library here would make one file import light up every file ever
+  // imported in past sessions.
+  function syncImportedLocalTracks(items) {
+    if (!Array.isArray(items) || items.length === 0) return;
+    if (!Array.isArray(state.localFiles)) state.localFiles = [];
+    const byKey = new Map();
+    [...state.localFiles, ...items].forEach(t => {
+      const key = String(t.id || t.path || t.filePath || t.url || t.title || '');
+      if (key && !byKey.has(key)) byKey.set(key, t);
+    });
+    state.localFiles = Array.from(byKey.values());
+    state.localTracks = state.localFiles;
+    const json = JSON.stringify(state.localFiles);
+    localStorage.setItem('riff_local_files', json);
+    localStorage.setItem('devsize_local_files', json);
+    localStorage.setItem('riff_local_tracks', json);
+    localStorage.setItem('devsize_local_tracks', json);
   }
-  window.syncImportedLocalTracks = syncImportedLocalTracks;
 
   async function importUniversalMusic() {
     if (!window.electronAPI || !window.electronAPI.importUniversalFiles) return;
@@ -20912,7 +20925,7 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
       }
       await Promise.all([worker(), worker()]);
 
-      await syncImportedLocalTracks();
+      syncImportedLocalTracks(items);
       await renderLocalView(true);
       showToast(`Imported ${items.length} tracks`);
     } catch (e) {
