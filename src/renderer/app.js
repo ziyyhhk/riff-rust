@@ -31704,7 +31704,8 @@ function bindCoverHoldZoom(wrapEl) {
   // breakpoint, which hides the whole shell on a phone.
   const phoneMQ = window.matchMedia('(max-width: 600px)');
   const touchUI = window.matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0;
-  function isPhoneUI() { return phoneMQ.matches || (touchUI && window.innerWidth <= 700); }
+  const phoneUA = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+  function isPhoneUI() { return phoneUA || phoneMQ.matches || (touchUI && window.innerWidth <= 700); }
   function syncPhoneUI() {
     const on = isPhoneUI();
     document.body.classList.toggle('phone-ui', on);

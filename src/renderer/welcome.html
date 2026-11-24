@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Welcome to Riff - Setup</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="mobile.css?v=0.1.22">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
   <style>
@@ -524,6 +525,15 @@
   </style>
 </head>
 <body>
+<script>
+(function () {
+  var ua = navigator.userAgent || '';
+  var mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
+    (window.matchMedia && window.matchMedia('(max-width: 700px)').matches) ||
+    navigator.maxTouchPoints > 0;
+  if (mobile) document.body.classList.add('phone-ui');
+})();
+</script>
 
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <filter id="logoTint" color-interpolation-filters="sRGB">
