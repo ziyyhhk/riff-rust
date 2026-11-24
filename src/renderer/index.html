@@ -1780,6 +1780,27 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                   <div class="setting-item">
                     <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
                       <div style="display: flex; flex-direction: column; gap: 2px;">
+                        <span class="setting-name" data-i18n>Use Default Banner</span>
+                        <span class="setting-hint" data-i18n>On by default. Turn off to use your own picture as the profile banner.</span>
+                      </div>
+                      <button type="button" class="effect-switch-btn active" id="btn-acc-default-banner" aria-pressed="true"><span class="thumb"></span></button>
+                    </div>
+                  </div>
+                  <div class="setting-item" id="acc-banner-row" style="display: none;">
+                    <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
+                      <div style="display: flex; flex-direction: column; gap: 2px;">
+                        <span class="setting-name" data-i18n>Profile banner</span>
+                        <span class="setting-hint" data-i18n>Click the banner above or Choose banner to pick an image</span>
+                      </div>
+                      <div style="display: flex; gap: 8px;">
+                        <button type="button" class="btn-outline-pill acc-btn" id="btn-pick-account-banner"><span data-i18n>Choose banner</span></button>
+                        <button type="button" class="btn-outline-pill acc-btn" id="btn-reset-account-banner"><span data-i18n>Reset banner</span></button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
+                      <div style="display: flex; flex-direction: column; gap: 2px;">
                         <span class="setting-name" data-i18n>Export Riff account (.rfacc)</span>
                         <span class="setting-hint" data-i18n>Save your profile, playlists, favorites, history, and settings to a file</span>
                       </div>

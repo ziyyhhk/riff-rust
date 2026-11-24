@@ -17048,3 +17048,17 @@ body:not(.sidebar-expanded):not(.mini) .sidebar-nav::-webkit-scrollbar { display
 .track-row.previewing .track-row-thumb-wrap img {
   transition: filter 0.25s ease;
 }
+
+/* ===== Custom account banner ===== */
+#tg-account-hero.tg-account-hero.custom-banner-enabled {
+  cursor: pointer;
+}
+#tg-account-hero.tg-account-hero.custom-banner {
+  background-image: var(--acc-banner-img) !important;
+  background-size: cover !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+}
+#tg-account-hero.tg-account-hero.custom-banner::after {
+  background: linear-gradient(180deg, rgba(0,0,0,.10) 0%, rgba(0,0,0,.45) 100%) !important;
+}

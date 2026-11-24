@@ -315,9 +315,14 @@ pub fn mime_from_ext(ext: &str) -> &'static str {
         "m4a" | "aac" => "audio/mp4",
         "webm" | "weba" => "audio/webm",
         "mp4" => "video/mp4",
-        "jpg" | "jpeg" => "image/jpeg",
+        "jpg" | "jpeg" | "jfif" | "jif" | "jpe" => "image/jpeg",
         "png" => "image/png",
         "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "avif" => "image/avif",
+        "tif" | "tiff" => "image/tiff",
+        "ico" => "image/x-icon",
         _ => "application/octet-stream",
     }
 }

@@ -36697,6 +36697,63 @@ function bindCoverHoldZoom(wrapEl) {
   }
   window.syncLocalAccountUI = syncLocalAccountUI;
 
+  // Profile banner: default is the generated gradient hero. Turning the toggle
+  // off reveals the custom banner controls and uses the chosen image instead.
+  const accountHero = document.getElementById('tg-account-hero');
+  const bannerToggle = document.getElementById('btn-acc-default-banner');
+  const bannerRow = document.getElementById('acc-banner-row');
+
+  function syncAccountBannerUI() {
+    const useDefault = localStorage.getItem('riff_use_default_banner') !== '0';
+    if (bannerToggle) {
+      bannerToggle.classList.toggle('active', useDefault);
+      bannerToggle.setAttribute('aria-pressed', useDefault ? 'true' : 'false');
+    }
+    if (bannerRow) bannerRow.style.display = useDefault ? 'none' : '';
+    if (accountHero) {
+      const banner = useDefault ? '' : toMediaUrl((localStorage.getItem('riff_user_banner') || '').trim());
+      accountHero.classList.toggle('custom-banner', Boolean(banner));
+      accountHero.classList.toggle('custom-banner-enabled', !useDefault);
+      if (banner) {
+        accountHero.style.setProperty('--acc-banner-img', `url("${banner}")`);
+      } else {
+        accountHero.style.removeProperty('--acc-banner-img');
+      }
+    }
+  }
+  window.syncAccountBannerUI = syncAccountBannerUI;
+
+  async function pickAccountBanner() {
+    if (window.electronAPI && window.electronAPI.pickMedia) {
+      const url = await window.electronAPI.pickMedia();
+      if (url) {
+        localStorage.setItem('riff_user_banner', url);
+        syncAccountBannerUI();
+      }
+    }
+  }
+
+  if (bannerToggle) {
+    bannerToggle.addEventListener('click', () => {
+      const useDefault = localStorage.getItem('riff_use_default_banner') !== '0';
+      localStorage.setItem('riff_use_default_banner', useDefault ? '0' : '1');
+      syncAccountBannerUI();
+    });
+  }
+  const btnPickBanner = document.getElementById('btn-pick-account-banner');
+  if (btnPickBanner) btnPickBanner.addEventListener('click', pickAccountBanner);
+  if (accountHero) accountHero.addEventListener('click', (e) => {
+    if (localStorage.getItem('riff_use_default_banner') !== '0') return;
+    if (e.target.closest('.account-avatar-picker') || e.target.closest('.tg-account-name-wrap')) return;
+    pickAccountBanner();
+  });
+  const btnResetBanner = document.getElementById('btn-reset-account-banner');
+  if (btnResetBanner) btnResetBanner.addEventListener('click', () => {
+    localStorage.removeItem('riff_user_banner');
+    syncAccountBannerUI();
+  });
+  syncAccountBannerUI();
+
   const accountNicknameInput = document.getElementById('account-nickname-input');
   if (accountNicknameInput) {
     accountNicknameInput.addEventListener('input', (e) => {
@@ -42186,8 +42243,8 @@ function bindCoverHoldZoom(wrapEl) {
     });
   }
 
-  const isImageFile = (u) => /\.(png|jpe?g|webp|gif)($|\?)/i.test(u);
-  const isMediaFile = (u) => /\.(png|jpe?g|webp|gif|mp4|webm)($|\?)/i.test(u);
+  const isImageFile = (u) => /\.(?:png|jpe?g|jfif|jif|jpe|bmp|gif|webp|avif|tiff?|ico)(?:\?|$)/i.test(u) || /^data:image\//i.test(u);
+  const isMediaFile = (u) => /\.(?:png|jpe?g|jfif|jif|jpe|bmp|gif|webp|avif|tiff?|ico|mp4|webm|mov|mkv|avi)(?:\?|$)/i.test(u) || /^data:image\//i.test(u);
 
   if (btnChooseTrackCover) {
     btnChooseTrackCover.addEventListener('click', async () => {
