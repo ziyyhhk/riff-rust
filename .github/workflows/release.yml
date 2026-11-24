@@ -96,10 +96,22 @@ jobs:
           NDK_HOME: ${{ env.NDK_HOME }}
         run: npx tauri android build --apk --target aarch64 --ci
 
+      - name: Sign APK for sideloading
+        run: |
+          keytool -genkeypair -keystore debug.keystore -storepass android -keypass android \
+            -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -validity 10000 -keyalg RSA
+          APK="$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -n 1)"
+          ZIPALIGN="$(find "$ANDROID_HOME/build-tools" -type f -name zipalign | head -n 1)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | head -n 1)"
+          "$ZIPALIGN" -f -p 4 "$APK" aligned.apk
+          "$APKSIGNER" sign --ks debug.keystore --ks-pass pass:android \
+            --key-pass pass:android --out "$APK" aligned.apk
+          cp "$APK" riff-rust.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: riff-rust-android-arm64-apk
           path: |
-            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+            riff-rust.apk
           if-no-files-found: error
