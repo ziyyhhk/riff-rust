@@ -2,7 +2,7 @@
 // Injects its own modal DOM at runtime; styles live in updater.css.
 // Does not touch the existing update sheet in app.js/index.html.
 // Bridge: window.electronAPI (see electron-shim.js). Rust side:
-//   get_app_version() -> "0.1.23"
+//   get_app_version() -> "0.1.24"
 //   check_for_updates() -> { available: false } today (stub, no feed wired),
 //     so we also accept richer shapes and fall back to the GitHub releases
 //     API exactly like app.js's checkDirectFromRenderer does.
@@ -28,10 +28,10 @@
 
   // Short, honest changelog bullets for recent releases (from docs/releases).
   const CHANGELOG = {
-    '0.1.23': [
-      'Fixed the console window that appeared when starting the app.',
-      'Closing that console no longer closes Riff Rust.',
-      'No other changes in this release.'
+    '0.1.24': [
+      'Removed the automatic silent update that could replace the app while you were reading.',
+      'The changelog now shows only the newest release.',
+      'Updates happen only when you press Update Now.'
     ],
     '0.1.22': [
       'Smart Shuffle v2: its own sparkle button in the player, mini player and playlist header.',
@@ -186,13 +186,6 @@
       || (latestInfo.releaseNotes ? notesToBullets(latestInfo.releaseNotes) : [])
       || [];
     addSection(latest, latestBullets.length ? latestBullets : ['Bug fixes and performance improvements.']);
-
-    // A couple of previous versions, newest first.
-    const previous = Object.keys(CHANGELOG)
-      .filter((v) => isNewer(latest, v))
-      .sort((a, b) => (isNewer(a, b) ? -1 : 1))
-      .slice(0, 2);
-    previous.forEach((v) => addSection(v, CHANGELOG[v]));
   }
 
   // ------------------------------------------------------------- settings tab
@@ -225,15 +218,6 @@
         settings.autoCheck = on;
         saveSettings();
         scheduleAutoCheck();
-      }
-    ));
-    box.appendChild(makeToggle(
-      'Install automatically',
-      'Download and install new releases silently, without asking.',
-      settings.autoInstall,
-      (on) => {
-        settings.autoInstall = on;
-        saveSettings();
       }
     ));
     box.appendChild(el('p', 'riff-updx-settings-note',
@@ -554,14 +538,7 @@
 
       if (release && isNewer(release.version, currentVersion) && !isSkipped(release.version)) {
         latestInfo = release;
-        if (settings.autoInstall && !manual) {
-          recordInstall(release.version);
-          if (typeof api.installUpdateQuiet === 'function') {
-            try { await api.installUpdateQuiet(); } catch (_) {}
-          }
-        } else {
-          open();
-        }
+        open();
       } else if (manual && ui) {
         flashStatus('You are using the latest version of ' + APP_NAME + '.');
       }
