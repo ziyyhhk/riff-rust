@@ -7,9 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Text:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=0.1.24">
-  <link rel="stylesheet" href="updater.css?v=0.1.24">
-  <link rel="stylesheet" href="mobile.css?v=0.1.24">
+  <link rel="stylesheet" href="styles.css?v=0.1.25">
+  <link rel="stylesheet" href="updater.css?v=0.1.25">
+  <link rel="stylesheet" href="mobile.css?v=0.1.25">
   <script>if (/Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '')) document.documentElement.classList.add('platform-darwin');</script>
   <style id="tg-account-critical-css">
   #settings-nav-account.settings-account-nav-btn {
@@ -2685,7 +2685,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                     <span style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Automatically delete temporary cache files</span>
                   </div>
                 </div>
-                <select class="pill-select" id="cache-clear-days" title="Clear cache every" aria-label="Clear cache every" style="flex-shrink: 0;">
+                <select class="pill-select" id="cache-clear-days" title="Clear cache every" aria-label="Clear cache every" style="display: none;">
                   <option value="1">1 day</option>
                   <option value="3">3 days</option>
                   <option value="7" selected>7 days</option>
@@ -2693,6 +2693,20 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                   <option value="30">30 days</option>
                   <option value="0">Never</option>
                 </select>
+                <div class="m3-dropdown compact-select" id="cache-clear-dropdown">
+                  <button type="button" class="m3-dropdown-trigger" id="cache-clear-trigger" aria-haspopup="listbox" aria-expanded="false" aria-label="Clear cache every">
+                    <span class="m3-dropdown-label" id="cache-clear-label">7 days</span>
+                    <svg class="m3-dropdown-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </button>
+                  <div class="m3-dropdown-menu" id="cache-clear-menu" role="listbox">
+                    <button type="button" class="m3-dropdown-option" data-value="1" role="option">1 day</button>
+                    <button type="button" class="m3-dropdown-option" data-value="3" role="option">3 days</button>
+                    <button type="button" class="m3-dropdown-option selected" data-value="7" role="option" aria-selected="true">7 days</button>
+                    <button type="button" class="m3-dropdown-option" data-value="14" role="option">14 days</button>
+                    <button type="button" class="m3-dropdown-option" data-value="30" role="option">30 days</button>
+                    <button type="button" class="m3-dropdown-option" data-value="0" role="option">Never</button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -2738,7 +2752,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                     <span style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Automatically delete downloaded offline tracks</span>
                   </div>
                 </div>
-                <select class="pill-select" id="offline-clear-days" title="Clear offline library every" aria-label="Clear offline library every" style="flex-shrink: 0;">
+                <select class="pill-select" id="offline-clear-days" title="Clear offline library every" aria-label="Clear offline library every" style="display: none;">
                   <option value="7">7 days</option>
                   <option value="14">14 days</option>
                   <option value="30" selected>30 days</option>
@@ -2746,6 +2760,20 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                   <option value="90">90 days</option>
                   <option value="0">Never</option>
                 </select>
+                <div class="m3-dropdown compact-select" id="offline-clear-dropdown">
+                  <button type="button" class="m3-dropdown-trigger" id="offline-clear-trigger" aria-haspopup="listbox" aria-expanded="false" aria-label="Clear offline library every">
+                    <span class="m3-dropdown-label" id="offline-clear-label">30 days</span>
+                    <svg class="m3-dropdown-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </button>
+                  <div class="m3-dropdown-menu" id="offline-clear-menu" role="listbox">
+                    <button type="button" class="m3-dropdown-option" data-value="7" role="option">7 days</button>
+                    <button type="button" class="m3-dropdown-option" data-value="14" role="option">14 days</button>
+                    <button type="button" class="m3-dropdown-option selected" data-value="30" role="option" aria-selected="true">30 days</button>
+                    <button type="button" class="m3-dropdown-option" data-value="60" role="option">60 days</button>
+                    <button type="button" class="m3-dropdown-option" data-value="90" role="option">90 days</button>
+                    <button type="button" class="m3-dropdown-option" data-value="0" role="option">Never</button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -3218,7 +3246,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                   </div>
                   <div style="display: flex; flex-direction: column;">
                     <span class="setting-name">Riff Rust</span>
-                    <span id="about-version" style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Version 0.1.24</span>
+                    <span id="about-version" style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Version 0.1.25</span>
                   </div>
                 </div>
                 <button class="btn-pill-primary" id="btn-check-updates" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Check for updates</button>
@@ -3255,7 +3283,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
               </svg>
               Riff Rust made by ziyyhhk &amp; rootless, support me: <a href="https://discord.gg/PsTXVKeqFZ" target="_blank" rel="noopener" id="settings-discord-link" data-invite="PsTXVKeqFZ" title="Join our Discord">discord.gg/PsTXVKeqFZ</a>
             </span>
-            <span class="settings-version-tag">v0.1.24</span>
+            <span class="settings-version-tag">v0.1.25</span>
           </div>
             </div>
           </div>
@@ -4642,7 +4670,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
     <div class="ota-update-sheet" id="update-sheet-card">
       <div class="ota-update-time" id="update-release-time">Just now</div>
       <div class="ota-update-top-row">
-        <span class="ota-update-version" id="update-version-badge">v0.1.24</span>
+        <span class="ota-update-version" id="update-version-badge">v0.1.25</span>
         <div class="ota-update-actions">
           <button class="ota-btn-update" id="btn-update-now" type="button" data-i18n>Update</button>
           <button class="ota-btn-ignore" id="btn-update-later" type="button" data-i18n>Ignore</button>
@@ -5001,8 +5029,9 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
   <script src="shapes.js"></script>
   <script src="lyrics-rtl.js"></script>
   <script src="track-sort.js"></script>
-  <script src="electron-shim.js?v=0.1.24"></script>
-  <script src="updater.js?v=0.1.24" defer></script>
-<script src="app.js?v=0.1.24"></script>
+  <script src="electron-shim.js?v=0.1.25"></script>
+  <script src="updater.js?v=0.1.25" defer></script>
+<script src="next-track.js?v=0.1.25"></script>
+<script src="app.js?v=0.1.25"></script>
 </body>
 </html>

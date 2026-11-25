@@ -17076,3 +17076,24 @@ body:not(.sidebar-expanded):not(.mini) .sidebar-nav::-webkit-scrollbar { display
 #tg-account-hero.tg-account-hero > .tg-account-center {
   z-index: 2 !important;
 }
+
+/* ===== Storage auto-clear compact dropdowns ===== */
+#cache-clear-item .compact-select,
+#offline-clear-item .compact-select {
+  width: 116px;
+  flex-shrink: 0;
+}
+#cache-clear-item .compact-select .m3-dropdown-trigger,
+#offline-clear-item .compact-select .m3-dropdown-trigger {
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 10px !important;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+#cache-clear-item .compact-select .m3-dropdown-menu,
+#offline-clear-item .compact-select .m3-dropdown-menu {
+  left: auto;
+  right: 0;
+  min-width: 132px;
+  border-radius: 10px !important;
+}

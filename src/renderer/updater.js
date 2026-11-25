@@ -2,7 +2,7 @@
 // Injects its own modal DOM at runtime; styles live in updater.css.
 // Does not touch the existing update sheet in app.js/index.html.
 // Bridge: window.electronAPI (see electron-shim.js). Rust side:
-//   get_app_version() -> "0.1.24"
+//   get_app_version() -> "0.1.25"
 //   check_for_updates() -> { available: false } today (stub, no feed wired),
 //     so we also accept richer shapes and fall back to the GitHub releases
 //     API exactly like app.js's checkDirectFromRenderer does.
@@ -28,10 +28,10 @@
 
   // Short, honest changelog bullets for recent releases (from docs/releases).
   const CHANGELOG = {
-    '0.1.24': [
-      'Removed the automatic silent update that could replace the app while you were reading.',
-      'The changelog now shows only the newest release.',
-      'Updates happen only when you press Update Now.'
+    '0.1.25': [
+      'Repeat now loops the playlist instead of jumping to random autoplay tracks.',
+      'Storage cleanup intervals use a themed dropdown instead of the native OS menu.',
+      'No other changes in this release.'
     ],
     '0.1.22': [
       'Smart Shuffle v2: its own sparkle button in the player, mini player and playlist header.',

@@ -5502,7 +5502,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (activeTrim.start > 0 && el.nativeAudio.currentTime < activeTrim.start - 0.25) {
             el.nativeAudio.currentTime = activeTrim.start;
           } else if (activeTrim.end > activeTrim.start && el.nativeAudio.currentTime >= activeTrim.end) {
-            if (state.isRepeat) {
+            if (shouldRepeatCurrentTrack()) {
               el.nativeAudio.currentTime = activeTrim.start;
               playSmooth();
             } else {
@@ -7847,7 +7847,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     updateQueueBadge();
     if (state.currentView === 'queue') renderQueueView();
-    if (typeof autoplayEnabled === 'function' && autoplayEnabled()) ensureAutoplayBuffer();
+    if (typeof autoplayEnabled === 'function' && autoplayEnabled() && !state.isRepeat) ensureAutoplayBuffer();
 
     track.playedAt = Date.now();
     state.history = state.history.filter(t => !isSameTrack(t, track));
@@ -8102,7 +8102,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       clearTimeout(fetchAbortTimeout);
     }
     if (state.isRadioQueue && state.queue.length - 1 - state.queueIndex <= 3) ensureInfiniteWaveQueue();
-    if (typeof autoplayEnabled === 'function' && autoplayEnabled()) ensureAutoplayBuffer();
+    if (typeof autoplayEnabled === 'function' && autoplayEnabled() && !state.isRepeat) ensureAutoplayBuffer();
   }
 
   function flipAnimate(elements, mutateFn, duration = 380) {
@@ -13096,6 +13096,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     return getAdv('autoplay', true);
   }
 
+  // Repeat means repeat the current queue, not restart one forever. A one
+  // track queue simply repeats that track through the normal playNext wrap.
+  function shouldRepeatCurrentTrack() {
+    return Boolean(state.isRepeat) && (!Array.isArray(state.queue) || state.queue.length <= 1);
+  }
+
   function autoplayArtistList(track) {
     return String((track && track.artist) || '')
       .split(/,|&| feat\.? | ft\.? | x /i)
@@ -13191,6 +13197,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function ensureAutoplayBuffer() {
+    if (state.isRepeat) return;
     if (!autoplayEnabled() || !state.currentTrack) return;
     if (!Array.isArray(state.queue)) state.queue = [];
     if (!Array.isArray(state._autoplayPool)) state._autoplayPool = [];
@@ -13399,7 +13406,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       }
 
-      if (!state.isRadioQueue && !state.isShuffle && !state.smartShuffle && state.queueIndex + 1 >= state.queue.length && autoplayEnabled()) {
+      const autoplayAtEnd = (typeof window.RiffNextTrack !== 'undefined' && window.RiffNextTrack.shouldAutoplayAtEnd)
+        ? window.RiffNextTrack.shouldAutoplayAtEnd({
+          queueLength: state.queue.length,
+          queueIndex: state.queueIndex,
+          atEnd: state.queueIndex + 1 >= state.queue.length,
+          isRepeat: state.isRepeat,
+          isRadioQueue: state.isRadioQueue,
+          isShuffle: state.isShuffle,
+          smartShuffle: state.smartShuffle,
+          autoplayEnabled: autoplayEnabled()
+        })
+        : (!state.isRepeat && !state.isRadioQueue && !state.isShuffle && !state.smartShuffle && state.queueIndex + 1 >= state.queue.length && autoplayEnabled());
+      if (autoplayAtEnd) {
         if (await startAutoplay()) return;
       }
 
@@ -13920,7 +13939,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         pauseSmooth();
         return;
       }
-      if (state.isRepeat) {
+      if (shouldRepeatCurrentTrack()) {
         el.nativeAudio.currentTime = 0;
         playSmooth();
       } else {
@@ -14001,7 +14020,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (activeTrim.start > 0 && el.nativeAudio.currentTime < activeTrim.start - 0.25) {
             el.nativeAudio.currentTime = activeTrim.start;
           } else if (activeTrim.end > activeTrim.start && el.nativeAudio.currentTime >= activeTrim.end) {
-            if (state.isRepeat) {
+            if (shouldRepeatCurrentTrack()) {
               el.nativeAudio.currentTime = activeTrim.start;
               playSmooth();
             } else {
@@ -23969,6 +23988,17 @@ function bindCoverHoldZoom(wrapEl) {
       state.isRepeat = !state.isRepeat;
       localStorage.setItem('riff_repeat', state.isRepeat ? '1' : '0');
       el.btnRepeat.classList.toggle('active', state.isRepeat);
+      if (state.isRepeat) {
+        // Repeat the playlist itself. Drop any autoplay tracks that were buffered
+        // ahead of the current song so the queue loops only the selected list.
+        if (Array.isArray(state.queue)) {
+          const idx = Math.max(0, state.queueIndex || 0);
+          state.queue = state.queue.filter((track, i) => i <= idx || !track || !track._isAutoplay);
+        }
+        state._autoplayPool = [];
+        updateQueueBadge();
+        if (state.currentView === 'queue' && typeof renderQueueView === 'function') renderQueueView();
+      }
     });
   }
 
@@ -32580,8 +32610,8 @@ function bindCoverHoldZoom(wrapEl) {
   (function initUpdateUI() {
     const api = window.electronAPI;
     const $ = (id) => document.getElementById(id);
-    let currentAppVersion = '0.1.24';
-    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.24' : v;
+    let currentAppVersion = '0.1.25';
+    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.25' : v;
     if (api && api.getAppVersion) {
       api.getAppVersion().then((v) => {
         if (v) {
@@ -32664,7 +32694,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.1.24';
+      if (verEl) verEl.textContent = displayVer || 'v0.1.25';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -36021,7 +36051,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.1.24';
+    let appVer = '0.1.25';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();
@@ -41410,6 +41440,30 @@ function bindCoverHoldZoom(wrapEl) {
 
   applyAutoClearDays(document.getElementById('cache-clear-days'), 'riff_cache_clear_days', 7);
   applyAutoClearDays(document.getElementById('offline-clear-days'), 'riff_offline_clear_days', 30);
+
+  // Native selects render an ugly OS popup. These two storage rows use the same
+  // themed dropdown component as the other settings, with the hidden select
+  // still owning persistence and the Rust storage map.
+  function syncAutoClearMenuFromSelect(select, menuId) {
+    const menu = document.getElementById(menuId);
+    if (!menu || !select) return;
+    Array.from(select.options).forEach((option) => {
+      if (menu.querySelector('.m3-dropdown-option[data-value="' + option.value + '"]')) return;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'm3-dropdown-option';
+      button.dataset.value = option.value;
+      button.textContent = option.textContent;
+      button.setAttribute('role', 'option');
+      menu.appendChild(button);
+    });
+  }
+  const cacheClearSelect = document.getElementById('cache-clear-days');
+  const offlineClearSelect = document.getElementById('offline-clear-days');
+  syncAutoClearMenuFromSelect(cacheClearSelect, 'cache-clear-menu');
+  syncAutoClearMenuFromSelect(offlineClearSelect, 'offline-clear-menu');
+  setupSortDropdown('cache-clear-dropdown', 'cache-clear-trigger', 'cache-clear-menu', 'cache-clear-label', cacheClearSelect);
+  setupSortDropdown('offline-clear-dropdown', 'offline-clear-trigger', 'offline-clear-menu', 'offline-clear-label', offlineClearSelect);
 
   async function updateOfflineStorageUI() {
     const elSize = document.getElementById('offline-library-size');
