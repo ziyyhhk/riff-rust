@@ -113,13 +113,8 @@ jobs:
           if 'android.webkit.WebSettings' not in s:
               s = s.replace('import android.os.Bundle\n', 'import android.os.Bundle\nimport android.webkit.WebSettings\nimport android.webkit.WebView\n')
           if 'MIXED_CONTENT_ALWAYS_ALLOW' not in s:
-              s = s.replace('  }\n}', '''  }
-
-  override fun onWebViewCreate(webView: WebView) {
-    super.onWebViewCreate(webView)
-    webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-  }
-}''')
+              inject = '\n  override fun onWebViewCreate(webView: WebView) {\n    super.onWebViewCreate(webView)\n    webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW\n  }'
+              s = s.replace('  }\n}', inject + '\n}')
           open(p, 'w').write(s)
           print(s)
           PY
