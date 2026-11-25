@@ -2,7 +2,7 @@
 // Injects its own modal DOM at runtime; styles live in updater.css.
 // Does not touch the existing update sheet in app.js/index.html.
 // Bridge: window.electronAPI (see electron-shim.js). Rust side:
-//   get_app_version() -> "0.1.22"
+//   get_app_version() -> "0.1.23"
 //   check_for_updates() -> { available: false } today (stub, no feed wired),
 //     so we also accept richer shapes and fall back to the GitHub releases
 //     API exactly like app.js's checkDirectFromRenderer does.
@@ -28,6 +28,11 @@
 
   // Short, honest changelog bullets for recent releases (from docs/releases).
   const CHANGELOG = {
+    '0.1.23': [
+      'Fixed the console window that appeared when starting the app.',
+      'Closing that console no longer closes Riff Rust.',
+      'No other changes in this release.'
+    ],
     '0.1.22': [
       'Smart Shuffle v2: its own sparkle button in the player, mini player and playlist header.',
       'Smart shuffle never repeats the same artist back to back and spreads the last few artists apart.',

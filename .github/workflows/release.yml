@@ -5,12 +5,23 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      build:
+        description: Which target to build
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - windows
+          - android
 
 permissions:
   contents: write
 
 jobs:
   build-windows:
+    if: github.event_name != 'workflow_dispatch' || inputs.build == 'all' || inputs.build == 'windows'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,6 +53,7 @@ jobs:
           if-no-files-found: error
 
   build-android:
+    if: github.event_name != 'workflow_dispatch' || inputs.build == 'all' || inputs.build == 'android'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
