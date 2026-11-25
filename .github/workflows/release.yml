@@ -111,9 +111,15 @@ jobs:
           p = sys.argv[1]
           s = open(p).read()
           if 'android.webkit.WebSettings' not in s:
-              s = s.replace('import android.os.Bundle\n', 'import android.os.Bundle\nimport android.webkit.WebSettings\n')
+              s = s.replace('import android.os.Bundle\n', 'import android.os.Bundle\nimport android.webkit.WebSettings\nimport android.webkit.WebView\n')
           if 'MIXED_CONTENT_ALWAYS_ALLOW' not in s:
-              s = s.replace('super.onCreate(savedInstanceState)', 'super.onCreate(savedInstanceState)\n        getWebView()?.settings?.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW')
+              s = s.replace('  }\n}', '''  }
+
+  override fun onWebViewCreate(webView: WebView) {
+    super.onWebViewCreate(webView)
+    webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+  }
+}''')
           open(p, 'w').write(s)
           print(s)
           PY
