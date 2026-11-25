@@ -7895,7 +7895,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       if (track.platform === 'local') {
-        const streamUrl = track.url || (track.path ? (track.path.startsWith('file:') ? track.path : 'file://' + encodeURI(track.path)) : `http://127.0.0.1:${state.serverPort}/api/library-file?id=${encodeURIComponent(track.id)}`);
+        const streamUrl = (window.__RIFF_MOBILE__ && state.serverPort)
+          ? `http://127.0.0.1:${state.serverPort}/api/library-file?id=${encodeURIComponent(track.id)}`
+          : (track.url || (track.path ? (track.path.startsWith('file:') ? track.path : 'file://' + encodeURI(track.path)) : `http://127.0.0.1:${state.serverPort}/api/library-file?id=${encodeURIComponent(track.id)}`));
         if (currentToken !== state.loadToken) return;
         el.nativeAudio.src = streamUrl;
         playSmooth();
@@ -17793,7 +17795,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       let url = '';
       if (isLocalTrack) {
-        if (track.url && (String(track.url).startsWith('http') || String(track.url).startsWith('file:'))) {
+        if (window.__RIFF_MOBILE__ && id && state.serverPort) {
+          url = `http://127.0.0.1:${state.serverPort}/api/library-file?id=${encodeURIComponent(id)}`;
+        } else if (track.url && (String(track.url).startsWith('http') || String(track.url).startsWith('file:'))) {
           url = track.url;
         } else if (track.path) {
           url = String(track.path).startsWith('file:') ? track.path : 'file://' + encodeURI(track.path);
