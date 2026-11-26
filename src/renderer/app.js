@@ -6012,7 +6012,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (!state.isTvKaraokeOpen) {
-          const targetProgress = dur > 0 ? Math.max(0, Math.min(1, cur / dur)) : 0;
+          const targetProgress = (window.RiffScrubber && window.RiffScrubber.clampProgress)
+          ? window.RiffScrubber.clampProgress(cur, dur)
+          : (dur > 0 ? Math.max(0, Math.min(1, cur / dur)) : 0);
           if (isDraggingScrubber) {
             scrubProgress = targetProgress;
           } else {
@@ -6148,7 +6150,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             const th = 36;
             tCtx.clearRect(0, 0, tw, th);
 
-            const targetProgress = dur > 0 ? Math.max(0, Math.min(1, cur / dur)) : 0;
+            const targetProgress = (window.RiffScrubber && window.RiffScrubber.clampProgress)
+          ? window.RiffScrubber.clampProgress(cur, dur)
+          : (dur > 0 ? Math.max(0, Math.min(1, cur / dur)) : 0);
             const followSpeed = isDraggingScrubber ? 32 : 45;
             scrubProgress += (targetProgress - scrubProgress) * Math.min(1, dt * followSpeed);
             scrubProgress = Math.max(0, Math.min(1, Number.isFinite(scrubProgress) ? scrubProgress : 0));
@@ -6301,6 +6305,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (typeof updateCoverAnimVisibility === 'function') updateCoverAnimVisibility();
       resizeCanvases();
       hasDrawnPausedFrame = false;
+      // Do not carry a stale animation timestamp over from another app. Snap
+      // progress to the real audio time before restarting the smooth scrubber.
+      if (typeof scrubLastTime !== 'undefined') scrubLastTime = 0;
+      if (el.nativeAudio) {
+        const audioDur = getReliableTrackDuration();
+        const audioCur = Number.isFinite(el.nativeAudio.currentTime) ? el.nativeAudio.currentTime : 0;
+        scrubProgress = (window.RiffScrubber && window.RiffScrubber.clampProgress)
+          ? window.RiffScrubber.clampProgress(audioCur, audioDur)
+          : (audioDur > 0 ? Math.max(0, Math.min(1, audioCur / audioDur)) : 0);
+        lastKnownAudioTime = audioCur;
+        lastAudioTimePerf = performance.now();
+      }
       if (state.isPlaying || isDraggingScrubber) startVisualizers();
       if (typeof cacheModal !== 'undefined' && cacheModal && cacheModal.classList.contains('visible') && typeof cacheRafId !== 'undefined' && !cacheRafId) {
         cacheRafId = requestAnimationFrame(cacheFrame);
@@ -20843,10 +20859,11 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
   // to keep idle CPU near zero. Restored when the window is visible again.
   try {
     const syncPause = () => {
-      const paused = document.hidden || !document.hasFocus();
+      const paused = document.hidden;
       window.riffPaused = paused;
       document.body.classList.toggle('riff-paused', paused);
       if (paused) {
+        try { window.electronAPI?.trimMemory?.(); } catch (_) {}
         if (typeof animationFrameId === 'number' && animationFrameId) {
           cancelAnimationFrame(animationFrameId);
           animationFrameId = 0;
@@ -20855,6 +20872,11 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
           cancelAnimationFrame(cacheRafId);
           cacheRafId = 0;
         }
+      }
+      if (!paused && typeof startVisualizers === 'function' && state.isPlaying) {
+        // Re-sync scrubber timing after another app/OS window had focus.
+        if (typeof scrubLastTime !== 'undefined') scrubLastTime = 0;
+        startVisualizers();
       }
     };
     document.addEventListener('visibilitychange', syncPause);
@@ -32610,8 +32632,8 @@ function bindCoverHoldZoom(wrapEl) {
   (function initUpdateUI() {
     const api = window.electronAPI;
     const $ = (id) => document.getElementById(id);
-    let currentAppVersion = '0.1.25';
-    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.25' : v;
+    let currentAppVersion = '0.1.26';
+    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.26' : v;
     if (api && api.getAppVersion) {
       api.getAppVersion().then((v) => {
         if (v) {
@@ -32694,7 +32716,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.1.25';
+      if (verEl) verEl.textContent = displayVer || 'v0.1.26';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -36051,7 +36073,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.1.25';
+    let appVer = '0.1.26';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();

@@ -634,6 +634,14 @@ pub fn run() {
                     commands::flush_storage_shadow(state.inner());
                 }
             }
+            tauri::WindowEvent::Focused(focused) => {
+                if let Some(webview) = window.app_handle().get_webview_window("main") {
+                    set_webview_memory_level(&webview);
+                }
+                if !focused {
+                    trim_working_sets();
+                }
+            }
             _ => {}
         })
         .build(tauri::generate_context!());
