@@ -20837,7 +20837,19 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
       if (!window.electronAPI || !window.electronAPI.trimMemory) return;
       let trimArmed = false;
       let trimPending = false;
+      let visibleTrimTimer = null;
       const idle = (cb) => (window.requestIdleCallback || ((f) => setTimeout(f, 1200)))(cb, { timeout: 4000 });
+      const scheduleVisibleTrim = () => {
+        if (visibleTrimTimer) clearTimeout(visibleTrimTimer);
+        if (state.isPlaying || document.hidden) return;
+        visibleTrimTimer = setTimeout(async () => {
+          visibleTrimTimer = null;
+          if (state.isPlaying || document.hidden || trimPending) return;
+          trimPending = true;
+          try { await window.electronAPI.trimMemory(); } catch (_) {}
+          trimPending = false;
+        }, 45000);
+      };
       const scheduleTrim = () => {
         if (!document.hidden || trimArmed || trimPending || state.isPlaying) return;
         trimArmed = true;
@@ -20850,9 +20862,20 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
         });
       };
       ['pointerdown', 'keydown', 'wheel'].forEach(t =>
-        window.addEventListener(t, () => { if (trimArmed) { trimArmed = false; } }, { passive: true }));
+        window.addEventListener(t, () => { if (trimArmed) { trimArmed = false; } scheduleVisibleTrim(); }, { passive: true }));
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden && visibleTrimTimer) { clearTimeout(visibleTrimTimer); visibleTrimTimer = null; }
+        else if (!document.hidden) scheduleVisibleTrim();
+      });
+      if (el.nativeAudio) {
+        ['play', 'playing'].forEach(t => el.nativeAudio.addEventListener(t, () => {
+          if (visibleTrimTimer) { clearTimeout(visibleTrimTimer); visibleTrimTimer = null; }
+        }, { passive: true }));
+        el.nativeAudio.addEventListener('pause', scheduleVisibleTrim, { passive: true });
+      }
       setInterval(scheduleTrim, 5 * 60 * 1000);
       setTimeout(scheduleTrim, 4000);
+      scheduleVisibleTrim();
     } catch (_) {}
   })();
 
@@ -32633,8 +32656,8 @@ function bindCoverHoldZoom(wrapEl) {
   (function initUpdateUI() {
     const api = window.electronAPI;
     const $ = (id) => document.getElementById(id);
-    let currentAppVersion = '0.1.27';
-    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.27' : v;
+    let currentAppVersion = '0.1.28';
+    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.28' : v;
     if (api && api.getAppVersion) {
       api.getAppVersion().then((v) => {
         if (v) {
@@ -32717,7 +32740,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.1.27';
+      if (verEl) verEl.textContent = displayVer || 'v0.1.28';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -36074,7 +36097,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.1.27';
+    let appVer = '0.1.28';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();

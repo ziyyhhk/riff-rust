@@ -15,6 +15,12 @@ test('idle work is throttled instead of polling every half second', () => {
   assert.ok(!app.includes('setInterval(scheduleTrim, 12000)'));
 });
 
+test('visible idle performs one memory trim after genuine inactivity', () => {
+  assert.ok(app.includes('}, 45000);'));
+  assert.ok(app.includes('const scheduleVisibleTrim = () => {'));
+  assert.ok(app.includes("el.nativeAudio.addEventListener('pause', scheduleVisibleTrim"));
+});
+
 test('memory trims only run while hidden', () => {
   assert.ok(app.includes('if (!document.hidden || trimArmed || trimPending || state.isPlaying) return;'));
   assert.ok(app.includes('if (!document.hidden || state.isPlaying || state.isLoadingTrack) return;'));
