@@ -17097,3 +17097,13 @@ body:not(.sidebar-expanded):not(.mini) .sidebar-nav::-webkit-scrollbar { display
   min-width: 132px;
   border-radius: 10px !important;
 }
+
+/* Idle stability: decorative animation does not need to run without audio. */
+body:not(.is-playing):not(.mini-lyrics-on) .home-ambient-layer,
+body:not(.is-playing):not(.mini-lyrics-on) .cover-bg-blob,
+body:not(.is-playing):not(.mini-lyrics-on) .bg-mesh-layer,
+body:not(.is-playing):not(.mini-lyrics-on) .tvk-ambient-blob,
+body:not(.is-playing):not(.mini-lyrics-on) .sp-playing-bars .sp-bars-anim,
+body:not(.is-playing):not(.mini-lyrics-on) .sb-lucky-pill-btn {
+  animation: none !important;
+}

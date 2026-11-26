@@ -2,7 +2,7 @@
 // Injects its own modal DOM at runtime; styles live in updater.css.
 // Does not touch the existing update sheet in app.js/index.html.
 // Bridge: window.electronAPI (see electron-shim.js). Rust side:
-//   get_app_version() -> "0.1.26"
+//   get_app_version() -> "0.1.27"
 //   check_for_updates() -> { available: false } today (stub, no feed wired),
 //     so we also accept richer shapes and fall back to the GitHub releases
 //     API exactly like app.js's checkDirectFromRenderer does.
@@ -28,9 +28,9 @@
 
   // Short, honest changelog bullets for recent releases (from docs/releases).
   const CHANGELOG = {
-    '0.1.26': [
-      'Progress scrubber re-syncs to the real audio timeline after switching apps or refocusing.',
-      'Memory is trimmed when the app loses focus, and animation work pauses when hidden.',
+    '0.1.27': [
+      'Idle RAM and CPU are steadier: fewer background polls and no repeated memory trims while visible.',
+      'Decorative animations stop when nothing is playing.',
       'No other changes in this release.'
     ],
     '0.1.22': [

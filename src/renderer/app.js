@@ -2673,7 +2673,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     sendBrowsingPresence(state.currentView || 'discover');
   }
   setTimeout(refreshBrowsingPresence, 3000);
-  setInterval(refreshBrowsingPresence, 30000);
+  setInterval(refreshBrowsingPresence, 120000);
 
   function sendDiscordRpcUpdate(track, isPlaying) {
     if (!window.electronAPI || !window.electronAPI.discordRpcUpdate) return;
@@ -4918,6 +4918,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   function normalizeEnabled() { return localStorage.getItem('riff_audio_normalize') === '1'; }
   function resetLevelWatcher() { levelAvgDb = -120; if (audioEngine && audioEngine.setNormalizeGainDb) audioEngine.setNormalizeGainDb(0); }
   setInterval(() => {
+    if (!normalizeEnabled()) return;
     const audio = el.nativeAudio;
     if (!audioEngine || !audioEngine.getLevelDb || !audio || audio.paused || !state.isPlaying) return;
     const db = audioEngine.getLevelDb();
@@ -4930,7 +4931,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else if (levelAvgDb > -120) {
       resetLevelWatcher();
     }
-  }, 100);
+  }, 250);
 
   syncSettingsSlidersToState();
   updateHqRouting();
@@ -6353,9 +6354,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const triggerRendererMemoryTrim = () => {
     try {
-      // A full GC pauses the renderer. Only trim when audio is idle, and let
-      // the browser schedule it between frames instead of on a fixed timer.
-      if (state.isPlaying || state.isLoadingTrack) return;
+      // A full GC pauses the renderer. Only trim when the app is both hidden
+      // and audio is idle, so visible idle with focus stays stable.
+      if (!document.hidden || state.isPlaying || state.isLoadingTrack) return;
       const run = () => {
         try {
           if (typeof window.gc === 'function') window.gc();
@@ -6374,7 +6375,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     setTimeout(triggerRendererMemoryTrim, 1500);
   });
   window.addEventListener('focus', () => setUnfocused(false));
-  setInterval(triggerRendererMemoryTrim, 60 * 1000);
+  setInterval(triggerRendererMemoryTrim, 5 * 60 * 1000);
 
   function applyVisualEffects() {
     const v = state.vfx;
@@ -20838,7 +20839,7 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
       let trimPending = false;
       const idle = (cb) => (window.requestIdleCallback || ((f) => setTimeout(f, 1200)))(cb, { timeout: 4000 });
       const scheduleTrim = () => {
-        if (trimArmed || trimPending || state.isPlaying) return;
+        if (!document.hidden || trimArmed || trimPending || state.isPlaying) return;
         trimArmed = true;
         idle(async () => {
           trimArmed = false;
@@ -20850,7 +20851,7 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
       };
       ['pointerdown', 'keydown', 'wheel'].forEach(t =>
         window.addEventListener(t, () => { if (trimArmed) { trimArmed = false; } }, { passive: true }));
-      setInterval(scheduleTrim, 12000);
+      setInterval(scheduleTrim, 5 * 60 * 1000);
       setTimeout(scheduleTrim, 4000);
     } catch (_) {}
   })();
@@ -32632,8 +32633,8 @@ function bindCoverHoldZoom(wrapEl) {
   (function initUpdateUI() {
     const api = window.electronAPI;
     const $ = (id) => document.getElementById(id);
-    let currentAppVersion = '0.1.26';
-    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.26' : v;
+    let currentAppVersion = '0.1.27';
+    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.1.27' : v;
     if (api && api.getAppVersion) {
       api.getAppVersion().then((v) => {
         if (v) {
@@ -32716,7 +32717,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.1.26';
+      if (verEl) verEl.textContent = displayVer || 'v0.1.27';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -33286,7 +33287,7 @@ function bindCoverHoldZoom(wrapEl) {
     } catch (_) {}
   }
   refreshDiscordRpcStatus();
-  setInterval(refreshDiscordRpcStatus, 5000);
+  setInterval(refreshDiscordRpcStatus, 60 * 1000);
 
   function syncDiscordRpcUI() {
     if (btnDiscordRpc) {
@@ -36073,7 +36074,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.1.26';
+    let appVer = '0.1.27';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();
@@ -41859,7 +41860,7 @@ function bindCoverHoldZoom(wrapEl) {
           toolsPollInterval = null;
         }
       } catch (e) {}
-    }, 500);
+    }, 2000);
   }
 
   function startToolsInstall() {
@@ -42992,9 +42993,9 @@ function bindCoverHoldZoom(wrapEl) {
     });
     window.addEventListener('resize', updateTabLine);
     setInterval(() => {
-      if (document.hidden) return;
+      if (document.hidden || !panel.classList.contains('open')) return;
       refresh(false);
-    }, 1500);
+    }, 5000);
     localStorage.removeItem('riff_queue_panel_open');
   }
 
